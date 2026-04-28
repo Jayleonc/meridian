@@ -1,0 +1,26 @@
+server:
+  name: probe
+  environment: dev
+  audit_log_path: /var/log/probe_audit.log
+
+limits:
+  max_lines: 50
+  max_bytes: 65536
+  max_time_range_hours: 24
+  command_timeout_seconds: 10
+
+security:
+  redact_enabled: true
+
+services:
+  gateway:
+    log_paths:
+      - /data/logs/gateway/gateway.log
+    request_id_patterns:
+      - "req_id="
+      - "request_id="
+  scheduler:
+    log_paths:
+      - /data/logs/scheduler/scheduler.log
+    request_id_patterns:
+      - "req_id="

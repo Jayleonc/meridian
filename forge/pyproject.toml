@@ -1,0 +1,13 @@
+[project]
+name = "meridian-forge"
+version = "0.1.0"
+description = "Meridian Forge — MCP Builder"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp",
+    "jinja2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

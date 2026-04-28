@@ -1,0 +1,4 @@
+interface:
+  display_name: "Meridian 项目治理"
+  short_description: "路线图治理与自我进化"
+  default_prompt: "使用 meridian-governance 推进下一个 Meridian 项目变更。"

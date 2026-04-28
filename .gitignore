@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+.venv/
+.env
+node_modules/
+console/dist/
+.DS_Store
+.meridian/
+.claude/settings.local.json
+*.log
+.pytest_cache/
+.ruff_cache/
+
+docs/
+*.drawio
+temp/
+
+# Meridian strategy summary
+meridian_strategy_summary.md
