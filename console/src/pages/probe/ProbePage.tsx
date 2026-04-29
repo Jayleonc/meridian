@@ -61,11 +61,19 @@ function traceBackHoursFromTimestamp(timestamp?: string): number {
   const target = parseTraceTimestamp(timestamp);
   if (!target) return 0;
 
-  let diffMs = Date.now() - target.getTime();
+  const now = new Date();
+  const nowHour = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours());
+  const targetHour = new Date(
+    target.getFullYear(),
+    target.getMonth(),
+    target.getDate(),
+    target.getHours()
+  );
+
+  let diffMs = nowHour.getTime() - targetHour.getTime();
   if (diffMs < 0) diffMs += 24 * 60 * 60 * 1000;
-  const diffHours = Math.max(0, diffMs / (60 * 60 * 1000));
-  const withBuffer = Math.max(1, Math.floor(diffHours) + 1);
-  return Math.min(TRACE_MAX_BACK_HOURS, withBuffer);
+  const hourBucketDiff = Math.floor(diffMs / (60 * 60 * 1000));
+  return Math.min(TRACE_MAX_BACK_HOURS, Math.max(0, hourBucketDiff));
 }
 
 function traceBackHoursFromParams(backHoursParam: string | null, hintTime: string): number {
@@ -100,7 +108,8 @@ function traceAutoHintLabel(hintTime: string, backHours: number) {
     diffMinutes < 90
       ? `约 ${Math.max(1, diffMinutes)} 分钟前`
       : `约 ${Math.max(1, Math.round(diffMinutes / 60))} 小时前`;
-  return `${age}，glog.sh -b ${backHours}`;
+  const glogLabel = backHours > 0 ? `glog.sh -b ${backHours}` : "当前小时，无需 -b";
+  return `${age}，${glogLabel}`;
 }
 
 export default function ProbePage() {

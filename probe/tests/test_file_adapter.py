@@ -224,8 +224,9 @@ def test_calc_back_hours_accepts_fractional_log_time(monkeypatch):
 
     monkeypatch.setattr(log_service, "datetime", FixedDateTime)
 
+    assert log_service._calc_back_hours("04-29T16:01:00.0000") == 0
     assert log_service._calc_back_hours("04-29T15:25:34.7873") == 1
-    assert log_service._calc_back_hours("04-29T12:05:01.1234") == 5
+    assert log_service._calc_back_hours("04-29T12:05:01.1234") == 4
 
 
 def test_context_strips_ansi_sequences(tmp_path, monkeypatch):

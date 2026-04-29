@@ -269,7 +269,8 @@ def _calc_back_hours(hint_time: str) -> int:
     - "2026-03-18T17:12:40" / "2026-03-18 17:12:40" — 完整时间
     - "03-18T17:12:40" — 日志格式的时间
 
-    返回：向前搜索的小时数（向上取整，+1 小时缓冲）
+    返回：按日志小时桶计算的 glog.sh -b 小时数。同一小时返回 0，
+    上一小时返回 1，再上一小时返回 2。
     """
     now = datetime.now()
     hint = hint_time.strip()
@@ -298,14 +299,14 @@ def _calc_back_hours(hint_time: str) -> int:
     if target is None:
         return 0  # 解析失败，用默认值
 
-    diff_hours = (now - target).total_seconds() / 3600
-    if diff_hours < 0:
-        # 用户说的时间在未来？可能是昨天的同一时间
-        target = target - timedelta(days=1)
-        diff_hours = (now - target).total_seconds() / 3600
+    now_hour = now.replace(minute=0, second=0, microsecond=0)
+    target_hour = target.replace(minute=0, second=0, microsecond=0)
+    if target_hour > now_hour:
+        # 用户说的小时在未来？可能是昨天的同一小时
+        target_hour = target_hour - timedelta(days=1)
 
-    # 向上取整 + 1 小时缓冲，最少 1
-    return max(1, int(diff_hours) + 1)
+    diff_hours = int((now_hour - target_hour).total_seconds() // 3600)
+    return max(0, diff_hours)
 
 
 async def search_by_request_id(
