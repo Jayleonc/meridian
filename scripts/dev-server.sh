@@ -36,6 +36,13 @@ if [[ "$BUILD_CONSOLE" == "true" ]]; then
 
     echo "🏗️  构建 Console 静态资源..."
     (cd console && npm run build)
+elif [[ ! -f console/dist/index.html ]]; then
+    echo "错误: 已跳过 Console 构建，但 console/dist/index.html 不存在。" >&2
+    echo "请在本地构建并上传前端产物：" >&2
+    echo "  ./scripts/package-console-dist.sh" >&2
+    echo "  scp .meridian/artifacts/console-dist.tar.gz <server>:/opt/meridian/" >&2
+    echo "  ./scripts/install-console-dist.sh /opt/meridian/console-dist.tar.gz" >&2
+    exit 1
 fi
 
 export MERIDIAN_NEXUS_HOST="${MERIDIAN_NEXUS_HOST:-0.0.0.0}"

@@ -60,6 +60,19 @@ http://<dev-server>:3000
 
 Console 静态资源由 Nexus 托管，Console 的所有后端请求仍走 `/api/*`、`/svc/*`、`/api/chat/*`、`/mcp/*`，不需要额外开放 `3010`。
 
+如果开发服务器 Node 版本太旧，可以在本地构建 Console，再把静态产物传到服务器：
+
+```bash
+# 本地机器：构建并打包 console/dist
+./scripts/package-console-dist.sh
+scp .meridian/artifacts/console-dist.tar.gz <dev-server>:/opt/meridian/
+
+# 开发服务器：解包静态产物并跳过前端构建
+cd /opt/meridian
+./scripts/install-console-dist.sh /opt/meridian/console-dist.tar.gz
+./scripts/dev-server.sh --skip-console-build
+```
+
 启动后，`dev-server.sh` 会把各服务输出写入：
 
 ```text
