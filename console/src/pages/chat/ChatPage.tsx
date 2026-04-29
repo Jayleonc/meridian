@@ -40,6 +40,7 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const threadRef = useRef<HTMLDivElement | null>(null);
+  const sendingRef = useRef(false);
 
   const modelLabel = useMemo(() => {
     if (!config) return "checking";
@@ -89,8 +90,10 @@ export default function ChatPage() {
 
   async function send(text?: string) {
     const content = (text ?? input).trim();
-    if (!content || !session || sending) return;
+    if (!content || !session || sendingRef.current) return;
 
+    const sessionId = session.id;
+    sendingRef.current = true;
     setInput("");
     setSending(true);
     const optimistic: ChatMessage = {
@@ -105,18 +108,26 @@ export default function ChatPage() {
     );
 
     try {
-      const result = await chat.sendMessage(session.id, content);
+      const result = await chat.sendMessage(sessionId, content);
       window.localStorage.setItem(CHAT_SESSION_KEY, result.session_id);
       setSession(result.session);
     } catch (e) {
+      setSession((current) => {
+        if (!current || current.id !== sessionId) return current;
+        return {
+          ...current,
+          messages: current.messages.filter((message) => message.id !== optimistic.id),
+        };
+      });
       toast("error", e instanceof Error ? e.message : "消息发送失败");
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   }
 
   async function createNewSession() {
-    if (sending) return;
+    if (sendingRef.current) return;
     setLoading(true);
     try {
       const created = await chat.createSession("Console Agent");
@@ -203,7 +214,7 @@ export default function ChatPage() {
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 void send();
               }

@@ -27,9 +27,35 @@ from src.agent.sessions import InMemorySessionStore, SessionStore
 logger = logging.getLogger(__name__)
 
 
+class SessionTurnLocks:
+    """Best-effort in-process guard for one active Agent turn per chat session."""
+
+    def __init__(self) -> None:
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._guard = asyncio.Lock()
+
+    async def try_acquire(self, session_id: str) -> asyncio.Lock | None:
+        async with self._guard:
+            lock = self._locks.get(session_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._locks[session_id] = lock
+            if lock.locked():
+                return None
+            await lock.acquire()
+            return lock
+
+    async def release(self, session_id: str, lock: asyncio.Lock) -> None:
+        lock.release()
+        async with self._guard:
+            if self._locks.get(session_id) is lock and not lock.locked():
+                self._locks.pop(session_id, None)
+
+
 def create_chat_router(tool_executor: ToolExecutor, session_store: SessionStore | None = None) -> APIRouter:
     router = APIRouter()
     sessions = session_store or InMemorySessionStore()
+    turn_locks = SessionTurnLocks()
 
     @router.get("/config", response_model=ChatConfig)
     async def config() -> ChatConfig:
@@ -78,46 +104,56 @@ def create_chat_router(tool_executor: ToolExecutor, session_store: SessionStore 
         if not content:
             raise HTTPException(status_code=400, detail="Message content is required")
 
-        await sessions.add_user_message(session, content)
-
-        adapter = LangChainModelAdapter()
-        runtime = AgentRuntime(adapter, tool_executor)
-        try:
-            text, tool_calls = await asyncio.wait_for(
-                runtime.run(session.messages),
-                timeout=AGENT_TURN_TIMEOUT_SECONDS,
-            )
-        except TimeoutError as exc:
-            logger.warning(
-                "Agent turn timed out after %s seconds: session=%s provider=%s model=%s",
-                AGENT_TURN_TIMEOUT_SECONDS,
-                session_id,
-                adapter.config.provider,
-                adapter.config.model,
-            )
+        turn_lock = await turn_locks.try_acquire(session_id)
+        if turn_lock is None:
             raise HTTPException(
-                status_code=504,
-                detail=(
-                    f"Agent 响应超时（{AGENT_TURN_TIMEOUT_SECONDS}s）。"
-                    "请检查模型网关/API Key/网络连通性，或缩小问题范围后重试。"
-                ),
-            ) from exc
-        except ModelProviderError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+                status_code=409,
+                detail="该会话上一条消息仍在处理中，请等待完成后再发送。",
+            )
 
-        assistant = await sessions.add_assistant_message(
-            session,
-            text or "我没有得到可用的模型输出。",
-            tool_calls,
-        )
+        try:
+            await sessions.add_user_message(session, content)
 
-        return ChatTurnResponse(
-            session_id=session.id,
-            provider=adapter.config.provider,
-            model=adapter.config.model,
-            assistant=assistant,
-            tool_calls=tool_calls,
-            session=session,
-        )
+            adapter = LangChainModelAdapter()
+            runtime = AgentRuntime(adapter, tool_executor)
+            try:
+                text, tool_calls = await asyncio.wait_for(
+                    runtime.run(session.messages),
+                    timeout=AGENT_TURN_TIMEOUT_SECONDS,
+                )
+            except TimeoutError as exc:
+                logger.warning(
+                    "Agent turn timed out after %s seconds: session=%s provider=%s model=%s",
+                    AGENT_TURN_TIMEOUT_SECONDS,
+                    session_id,
+                    adapter.config.provider,
+                    adapter.config.model,
+                )
+                raise HTTPException(
+                    status_code=504,
+                    detail=(
+                        f"Agent 响应超时（{AGENT_TURN_TIMEOUT_SECONDS}s）。"
+                        "请检查模型网关/API Key/网络连通性，或缩小问题范围后重试。"
+                    ),
+                ) from exc
+            except ModelProviderError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+            assistant = await sessions.add_assistant_message(
+                session,
+                text or "我没有得到可用的模型输出。",
+                tool_calls,
+            )
+
+            return ChatTurnResponse(
+                session_id=session.id,
+                provider=adapter.config.provider,
+                model=adapter.config.model,
+                assistant=assistant,
+                tool_calls=tool_calls,
+                session=session,
+            )
+        finally:
+            await turn_locks.release(session_id, turn_lock)
 
     return router
