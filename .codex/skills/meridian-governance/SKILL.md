@@ -114,6 +114,7 @@ Meridian 默认边界如下：
 验证强度按影响范围决定：
 
 - Python 后端：`python -m py_compile ...`、导入检查、端点 smoke test
+- Probe 日志 adapter：涉及读取、grep、tail、解析或裁剪时，必须覆盖超长单行日志，避免业务日志 req/rsp body 击穿行读取限制。
 - Console：`npm run build`
 - Docker / 端口 / 配置：`docker compose config`、定向 `curl`
 - Agent：配置端点、创建会话、必要时做一次小模型工具调用测试

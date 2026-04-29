@@ -6,7 +6,7 @@
 """
 
 import asyncio
-import subprocess
+import re
 from collections import deque
 from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
@@ -66,7 +66,7 @@ async def grep_files(
     cmd.extend(str(f) for f in files)
 
     if from_end:
-        return await _grep_files_from_end(cmd, files, max_lines)
+        return await _grep_files_from_end(files, pattern, max_lines, extra_args or [])
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -103,54 +103,53 @@ async def grep_files(
 
 
 async def _grep_files_from_end(
-    grep_cmd: list[str],
     files: list[Path],
+    pattern: str,
     max_lines: int,
+    extra_args: list[str],
 ) -> list[tuple[str, int, str]]:
-    """执行 grep 后只保留最后 N 条，避免 Live Errors 卡在小时文件开头。"""
-    grep_proc = await asyncio.create_subprocess_exec(
-        *grep_cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    tail_lines: deque[str] = deque(maxlen=max_lines)
-
-    async def consume_stdout() -> None:
-        if grep_proc.stdout is None:
-            return
-        while True:
-            line = await grep_proc.stdout.readline()
-            if not line:
-                break
-            tail_lines.append(line.decode("utf-8", errors="replace").rstrip("\n"))
-
+    """扫描文件并保留最后 N 条匹配，避免超长日志行击穿 asyncio.readline 限制。"""
     try:
-        await asyncio.wait_for(
-            asyncio.gather(consume_stdout(), grep_proc.wait()),
+        return await asyncio.wait_for(
+            asyncio.to_thread(_scan_files_from_end, files, pattern, max_lines, extra_args),
             timeout=settings.limits.command_timeout_seconds,
         )
     except asyncio.TimeoutError:
-        grep_proc.kill()
-        await grep_proc.wait()
         raise TimeoutError("grep 超时")
 
-    return _parse_grep_output(list(tail_lines), files)
+
+def _scan_files_from_end(
+    files: list[Path],
+    pattern: str,
+    max_lines: int,
+    extra_args: list[str],
+) -> list[tuple[str, int, str]]:
+    matcher = _build_matcher(pattern, extra_args)
+    results: deque[tuple[str, int, str]] = deque(maxlen=max_lines)
+    for file in files:
+        with file.open(encoding="utf-8", errors="replace") as handle:
+            for line_number, line in enumerate(handle, 1):
+                text = line.rstrip("\n")
+                if matcher(text):
+                    results.append((str(file), line_number, _trim_result_line(text)))
+    return list(results)
 
 
-def _parse_grep_output(lines: list[str], files: list[Path]) -> list[tuple[str, int, str]]:
-    results = []
-    for line in lines:
-        # 多文件格式: filename:line_number:content
-        # 单文件格式: line_number:content
-        if len(files) == 1:
-            parts = line.split(":", 1)
-            if len(parts) == 2 and parts[0].isdigit():
-                results.append((str(files[0]), int(parts[0]), parts[1]))
-        else:
-            parts = line.split(":", 2)
-            if len(parts) >= 3 and parts[1].isdigit():
-                results.append((parts[0], int(parts[1]), parts[2]))
-    return results
+def _build_matcher(pattern: str, extra_args: list[str]):
+    if "-E" in extra_args or "-P" in extra_args:
+        try:
+            compiled = re.compile(pattern)
+        except re.error:
+            compiled = re.compile(re.escape(pattern))
+        return compiled.search
+    return lambda text: pattern in text
+
+
+def _trim_result_line(text: str) -> str:
+    max_len = max(settings.limits.max_line_length + 512, 2048)
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + f"...[截断, 原始 {len(text)} 字符]"
 
 
 def _validate_file_path(file_path: str) -> Path:

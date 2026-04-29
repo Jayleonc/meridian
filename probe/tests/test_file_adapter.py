@@ -17,7 +17,7 @@ async def test_grep_files_from_end_returns_latest_matches(tmp_path, monkeypatch)
                 "svc(1,1) 04-29T12:00:02.0000 INF source.go:2: skip",
                 "svc(1,1) 04-29T12:00:03.0000 ERR source.go:3: second",
                 "svc(1,1) 04-29T12:00:04.0000 ERR source.go:4: third",
-                "svc(1,1) 04-29T12:00:05.0000 ERR source.go:5: fourth",
+                "svc(1,1) 04-29T12:00:05.0000 ERR source.go:5: " + ("x" * 70000),
             ]
         )
     )
@@ -26,6 +26,7 @@ async def test_grep_files_from_end_returns_latest_matches(tmp_path, monkeypatch)
     results = await file_adapter.grep_files([log_file], "ERR", max_lines=3, from_end=True)
 
     assert [line_number for _, line_number, _ in results] == [3, 4, 5]
+    assert results[-1][2].endswith("字符]")
 
 
 def test_recent_hourly_files_use_configured_log_timezone(tmp_path, monkeypatch):
