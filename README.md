@@ -221,6 +221,7 @@ MERIDIAN_MODEL_API_KEY=<api-key-or-placeholder>
 
 启动 Nexus 与 Console 后访问 `/chat`。Agent 当前可通过 Nexus 调用 Probe 的日志搜索、错误巡检、request_id 追踪、服务列表和日志上下文工具。
 Console 会把当前 Agent 会话 ID 保存在浏览器本地，并通过 Meridian PostgreSQL 持久化 `chat_session` / `chat_message`；刷新页面后会恢复最近一次会话。PostgreSQL 不可用时 Nexus 会自动降级为进程内存会话，服务仍可用但刷新或重启后不会恢复历史消息。
+开发者排查 Agent 卡住、重复返回或工具调用异常时，可以通过 DevOps MCP 只读回看会话：`devops.list_chat_sessions`、`devops.search_chat_messages`、`devops.get_chat_session`；对应 HTTP 入口为 `/api/devops/chat/sessions`、`/api/devops/chat/search`、`/api/devops/chat/sessions/{session_id}`。
 
 Agent 单轮请求默认最多等待 60 秒，单次模型请求默认最多等待 45 秒，避免模型网关或网络问题让 Console 一直停在 Thinking：
 

@@ -11,7 +11,7 @@ from typing import Protocol
 import asyncpg
 
 from src.agent.config import CHAT_DB_ENABLED, chat_db_config
-from src.agent.models import ChatMessage, ChatSession, ChatToolCall
+from src.agent.models import ChatMessage, ChatSession, ChatSessionSummary, ChatToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,12 @@ class SessionStore(Protocol):
         ...
 
     async def get(self, session_id: str) -> ChatSession | None:
+        ...
+
+    async def list_recent(self, limit: int = 20) -> list[ChatSessionSummary]:
+        ...
+
+    async def search_messages(self, query: str, limit: int = 20) -> list[tuple[ChatSession, ChatMessage]]:
         ...
 
     async def add_user_message(self, session: ChatSession, content: str) -> ChatMessage:
@@ -60,6 +66,23 @@ class InMemorySessionStore:
 
     async def get(self, session_id: str) -> ChatSession | None:
         return self._sessions.get(session_id)
+
+    async def list_recent(self, limit: int = 20) -> list[ChatSessionSummary]:
+        sessions = sorted(self._sessions.values(), key=lambda item: item.updated_at, reverse=True)
+        return [_session_summary(session) for session in sessions[: _safe_limit(limit)]]
+
+    async def search_messages(self, query: str, limit: int = 20) -> list[tuple[ChatSession, ChatMessage]]:
+        needle = query.lower()
+        matches: list[tuple[ChatSession, ChatMessage]] = []
+        for session in sorted(self._sessions.values(), key=lambda item: item.updated_at, reverse=True):
+            for message in session.messages:
+                if needle in message.content.lower() or any(
+                    needle in _tool_call_text(call).lower() for call in message.tool_calls
+                ):
+                    matches.append((session, message))
+                    if len(matches) >= _safe_limit(limit):
+                        return matches
+        return matches
 
     async def add_user_message(self, session: ChatSession, content: str) -> ChatMessage:
         message = ChatMessage(
@@ -144,6 +167,80 @@ class PostgresSessionStore:
             updated_at=float(row["updated_at"]),
             messages=[_row_to_message(message_row) for message_row in message_rows],
         )
+
+    async def list_recent(self, limit: int = 20) -> list[ChatSessionSummary]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    s.id,
+                    s.title,
+                    s.created_at,
+                    s.updated_at,
+                    COUNT(m.id)::int AS message_count,
+                    latest.role AS last_message_role,
+                    latest.content AS last_message_content
+                FROM chat_session s
+                LEFT JOIN chat_message m ON m.session_id = s.id
+                LEFT JOIN LATERAL (
+                    SELECT role, content
+                    FROM chat_message
+                    WHERE session_id = s.id
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                ) latest ON true
+                GROUP BY s.id, latest.role, latest.content
+                ORDER BY s.updated_at DESC
+                LIMIT $1
+                """,
+                _safe_limit(limit),
+            )
+        return [_row_to_summary(row) for row in rows]
+
+    async def search_messages(self, query: str, limit: int = 20) -> list[tuple[ChatSession, ChatMessage]]:
+        pattern = f"%{query}%"
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    s.id AS session_id,
+                    s.title AS session_title,
+                    s.created_at AS session_created_at,
+                    s.updated_at AS session_updated_at,
+                    m.id AS message_id,
+                    m.role,
+                    m.content,
+                    m.created_at AS message_created_at,
+                    m.tool_calls
+                FROM chat_message m
+                JOIN chat_session s ON s.id = m.session_id
+                WHERE m.content ILIKE $1 OR m.tool_calls::text ILIKE $1
+                ORDER BY m.created_at DESC, m.id DESC
+                LIMIT $2
+                """,
+                pattern,
+                _safe_limit(limit),
+            )
+
+        matches: list[tuple[ChatSession, ChatMessage]] = []
+        for row in rows:
+            session = ChatSession(
+                id=row["session_id"],
+                title=row["session_title"],
+                created_at=float(row["session_created_at"]),
+                updated_at=float(row["session_updated_at"]),
+            )
+            message = _row_to_message(
+                {
+                    "id": row["message_id"],
+                    "role": row["role"],
+                    "content": row["content"],
+                    "created_at": row["message_created_at"],
+                    "tool_calls": row["tool_calls"],
+                }
+            )
+            matches.append((session, message))
+        return matches
 
     async def add_user_message(self, session: ChatSession, content: str) -> ChatMessage:
         message = ChatMessage(
@@ -257,6 +354,12 @@ class HybridSessionStore:
     async def get(self, session_id: str) -> ChatSession | None:
         return await self._active.get(session_id)
 
+    async def list_recent(self, limit: int = 20) -> list[ChatSessionSummary]:
+        return await self._active.list_recent(limit)
+
+    async def search_messages(self, query: str, limit: int = 20) -> list[tuple[ChatSession, ChatMessage]]:
+        return await self._active.search_messages(query, limit)
+
     async def add_user_message(self, session: ChatSession, content: str) -> ChatMessage:
         return await self._active.add_user_message(session, content)
 
@@ -305,4 +408,44 @@ def _row_to_message(row) -> ChatMessage:
         content=row["content"],
         created_at=float(row["created_at"]),
         tool_calls=[ChatToolCall(**call) for call in (tool_calls or [])],
+    )
+
+
+def _safe_limit(limit: int) -> int:
+    return max(1, min(int(limit), 100))
+
+
+def _preview(content: str, max_chars: int = 160) -> str:
+    compact = " ".join(content.split())
+    if len(compact) <= max_chars:
+        return compact
+    return f"{compact[: max_chars - 1]}…"
+
+
+def _tool_call_text(call: ChatToolCall) -> str:
+    return json.dumps(call.model_dump(mode="json"), ensure_ascii=False, default=str)
+
+
+def _session_summary(session: ChatSession) -> ChatSessionSummary:
+    last_message = session.messages[-1] if session.messages else None
+    return ChatSessionSummary(
+        id=session.id,
+        title=session.title,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        message_count=len(session.messages),
+        last_message_role=last_message.role if last_message else None,
+        last_message_preview=_preview(last_message.content) if last_message else "",
+    )
+
+
+def _row_to_summary(row) -> ChatSessionSummary:
+    return ChatSessionSummary(
+        id=row["id"],
+        title=row["title"],
+        created_at=float(row["created_at"]),
+        updated_at=float(row["updated_at"]),
+        message_count=int(row["message_count"] or 0),
+        last_message_role=row["last_message_role"],
+        last_message_preview=_preview(row["last_message_content"] or ""),
     )

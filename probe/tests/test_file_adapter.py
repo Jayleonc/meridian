@@ -78,6 +78,7 @@ async def test_service_log_pattern_matches_only_service_prefix(tmp_path):
                 "jzadapter(1,1) 04-29T12:00:01.0000 INF source.go:1: started",
                 "hlopen(1,1) 04-29T12:00:02.0000 ERR source.go:2: jzadapter failed",
                 "jzadapter(1,1) 04-29T12:00:03.0000 ERR source.go:3: failed",
+                "jzadapter(1,1) 04-29T12:00:04.0000 <TV34ERR2SRiqwVDezxkA> INF source.go:4: request id contains ERR",
             ]
         )
     )
@@ -86,3 +87,50 @@ async def test_service_log_pattern_matches_only_service_prefix(tmp_path):
     results = await file_adapter.grep_files([log_file], pattern, max_lines=10, extra_args=["-E"], from_end=True)
 
     assert [line_number for _, line_number, _ in results] == [3]
+
+
+@pytest.mark.asyncio
+async def test_level_pattern_does_not_match_err_inside_request_id(tmp_path):
+    log_file = tmp_path / "2026042912.log"
+    log_file.write_text(
+        "\n".join(
+            [
+                "hlopen(1,1) 04-29T12:00:01.0000 <TV34ERR2SRiqwVDezxkA> INF source.go:1: ok",
+                "hlopen(1,1) 04-29T12:00:02.0000 ERR source.go:2: failed",
+            ]
+        )
+    )
+
+    pattern = log_service._level_keyword_pattern("ERR")
+    results = await file_adapter.grep_files([log_file], pattern, max_lines=10, extra_args=["-E"], from_end=True)
+
+    assert [line_number for _, line_number, _ in results] == [2]
+
+
+def test_noise_filter_keeps_errors():
+    items = log_service._filter_items(
+        [
+            log_service.LogItem(
+                timestamp="04-29T12:00:01.0000",
+                level="INF",
+                service="hlopen",
+                source="source.go:1:",
+                text="Register handler success",
+                file="",
+                line_number=1,
+            ),
+            log_service.LogItem(
+                timestamp="04-29T12:00:02.0000",
+                level="ERR",
+                service="hlopen",
+                source="source.go:2:",
+                text="Register failed",
+                file="",
+                line_number=2,
+            ),
+        ],
+        service="hlopen",
+        exclude_noise=True,
+    )
+
+    assert [item.line_number for item in items] == [2]

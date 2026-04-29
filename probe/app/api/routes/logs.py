@@ -31,6 +31,7 @@ async def service_tail(
     keyword: str | None = Query(None),
     limit: int = Query(200, ge=1, le=500),
     include_full: bool = Query(False),
+    exclude_noise: bool = Query(False),
 ):
     """按服务查看最近日志"""
     try:
@@ -41,6 +42,7 @@ async def service_tail(
             keyword=keyword,
             limit=limit,
             include_full=include_full,
+            exclude_noise=exclude_noise,
         )
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail="日志搜索超时，请缩小时间范围或关键词后重试") from exc

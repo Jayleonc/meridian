@@ -166,6 +166,9 @@ def _nexus_info() -> dict[str, Any]:
                 "devops.config_check",
                 "devops.smoke_test",
                 "devops.console_status",
+                "devops.list_chat_sessions",
+                "devops.search_chat_messages",
+                "devops.get_chat_session",
             ],
         },
     }
@@ -296,6 +299,7 @@ async def _call_chat_tool(name: str, args: dict[str, Any]) -> Any:
                     "level": args.get("level"),
                     "keyword": args.get("keyword"),
                     "limit": args.get("limit", 50),
+                    "exclude_noise": args.get("exclude_noise"),
                 }
             ),
         )
@@ -452,6 +456,7 @@ async def probe_tail_service_logs(
     level: str | None = None,
     keyword: str | None = None,
     limit: int = 50,
+    exclude_noise: bool = False,
 ) -> str:
     """通过 Probe 按服务查看最近日志。"""
     data = await _probe(
@@ -463,6 +468,7 @@ async def probe_tail_service_logs(
                 "level": level,
                 "keyword": keyword,
                 "limit": limit,
+                "exclude_noise": exclude_noise,
             }
         ),
     )
@@ -548,6 +554,58 @@ async def devops_console_status() -> str:
     return _json(devops.console_status(_console_dist_dir()))
 
 
+@mcp.tool(name="devops.list_chat_sessions")
+async def devops_list_chat_sessions(limit: int = 20) -> str:
+    """列出最近 Agent Chat 会话摘要，用于回看卡住或重复响应的对话现场。"""
+    if not devops.is_enabled():
+        return _json(_devops_disabled())
+    sessions = await chat_session_store.list_recent(limit)
+    return _json(
+        {
+            "count": len(sessions),
+            "sessions": [session.model_dump(mode="json") for session in sessions],
+            "next_actions": ["search_chat_messages", "get_chat_session"],
+        }
+    )
+
+
+@mcp.tool(name="devops.search_chat_messages")
+async def devops_search_chat_messages(keyword: str, limit: int = 20) -> str:
+    """按关键词搜索 Agent Chat 会话消息和工具调用记录。"""
+    if not devops.is_enabled():
+        return _json(_devops_disabled())
+    query = keyword.strip()
+    if not query:
+        return _json({"error": "invalid_keyword", "detail": "keyword is required"})
+    matches = await chat_session_store.search_messages(query, limit)
+    return _json(
+        {
+            "query": query,
+            "count": len(matches),
+            "matches": [
+                {
+                    "session_id": session.id,
+                    "session_title": session.title,
+                    "message": message.model_dump(mode="json"),
+                }
+                for session, message in matches
+            ],
+            "next_actions": ["get_chat_session"],
+        }
+    )
+
+
+@mcp.tool(name="devops.get_chat_session")
+async def devops_get_chat_session(session_id: str) -> str:
+    """按 session_id 读取完整 Agent Chat 会话，包括工具调用参数、结果、错误和耗时。"""
+    if not devops.is_enabled():
+        return _json(_devops_disabled())
+    session = await chat_session_store.get(session_id)
+    if not session:
+        return _json({"error": "chat_session_not_found", "session_id": session_id})
+    return _json(session.model_dump(mode="json"))
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Meridian Nexus",
@@ -614,6 +672,46 @@ def create_app() -> FastAPI:
         if not devops.is_enabled():
             return _devops_disabled()
         return await _devops_smoke_result()
+
+    @app.get("/api/devops/chat/sessions")
+    async def devops_chat_sessions_api(limit: int = 20):
+        if not devops.is_enabled():
+            return _devops_disabled()
+        sessions = await chat_session_store.list_recent(limit)
+        return {
+            "count": len(sessions),
+            "sessions": [session.model_dump(mode="json") for session in sessions],
+        }
+
+    @app.get("/api/devops/chat/search")
+    async def devops_chat_search_api(keyword: str, limit: int = 20):
+        if not devops.is_enabled():
+            return _devops_disabled()
+        query = keyword.strip()
+        if not query:
+            return {"error": "invalid_keyword", "detail": "keyword is required"}
+        matches = await chat_session_store.search_messages(query, limit)
+        return {
+            "query": query,
+            "count": len(matches),
+            "matches": [
+                {
+                    "session_id": session.id,
+                    "session_title": session.title,
+                    "message": message.model_dump(mode="json"),
+                }
+                for session, message in matches
+            ],
+        }
+
+    @app.get("/api/devops/chat/sessions/{session_id}")
+    async def devops_chat_session_api(session_id: str):
+        if not devops.is_enabled():
+            return _devops_disabled()
+        session = await chat_session_store.get(session_id)
+        if not session:
+            return {"error": "chat_session_not_found", "session_id": session_id}
+        return session.model_dump(mode="json")
 
     app.include_router(
         create_chat_router(_call_chat_tool, chat_session_store),

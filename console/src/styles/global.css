@@ -728,6 +728,23 @@ select.input option {
   min-width: 0;
 }
 
+.check-control {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--t2);
+  font-size: 12px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.check-control input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--amber);
+}
+
 @media (max-width: 900px) {
   .service-log-layout {
     grid-template-columns: 1fr;

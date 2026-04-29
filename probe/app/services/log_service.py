@@ -124,11 +124,74 @@ def _service_log_pattern(
     命中请求体或错误文本里的同名字符串。
     """
     parts = [rf"^{re.escape(service)}\("]
-    if level:
-        parts.append(rf".*\b{re.escape(level.upper())}\b")
-    if keyword:
+    if level and keyword:
+        level_token = _level_grep_token(level)
+        escaped_keyword = re.escape(keyword)
+        parts.append(rf".*({level_token}.*{escaped_keyword}|{escaped_keyword}.*{level_token})")
+    elif level:
+        parts.append(rf".*{_level_grep_token(level)}")
+    elif keyword:
         parts.append(rf".*{re.escape(keyword)}")
     return "".join(parts)
+
+
+def _level_grep_token(level: str) -> str:
+    """返回适合 grep -E 的级别字段候选。
+
+    不用 `\bERR\b`，因为不同 grep 实现对 `\b` 支持不一致；同时 `ERR`
+    可能出现在 request_id 或正文里。Brick level 后面固定跟空白和 source。
+    """
+    return rf"{re.escape(level.upper())}[[:space:]]+"
+
+
+def _level_keyword_pattern(level: str, keyword: str | None = None) -> str:
+    token = _level_grep_token(level)
+    if not keyword:
+        return token
+    escaped = re.escape(keyword)
+    return rf"{token}.*{escaped}|{escaped}.*{token}"
+
+
+def _normalize_level(level: str | None) -> str | None:
+    if not level:
+        return None
+    normalized = level.strip().upper()
+    return normalized if normalized in {"ERR", "WAR", "INF", "DBG", "IMP"} else normalized
+
+
+def _is_noise_log(item: LogItem) -> bool:
+    """识别服务日志里的低价值注册/心跳噪音。
+
+    错误和告警永远保留；只隐藏普通信息日志中的 Register / heartbeat / keepalive。
+    """
+    if item.level in {"ERR", "WAR", "IMP"}:
+        return False
+    haystack = f"{item.source} {item.text}".lower()
+    return any(token in haystack for token in ("register", "registry", "heartbeat", "keepalive"))
+
+
+def _filter_items(
+    items: list[LogItem],
+    *,
+    service: str | None = None,
+    level: str | None = None,
+    exclude_noise: bool = False,
+) -> list[LogItem]:
+    normalized_level = _normalize_level(level)
+    filtered = items
+    if service:
+        filtered = [item for item in filtered if item.service == service]
+    if normalized_level:
+        filtered = [item for item in filtered if item.level == normalized_level]
+    if exclude_noise:
+        filtered = [item for item in filtered if not _is_noise_log(item)]
+    return filtered
+
+
+def _tail_scan_limit(limit: int, *, has_app_filter: bool = False) -> int:
+    if not has_app_filter:
+        return limit
+    return min(max(limit * 5, limit), 2500)
 
 
 def _parsed_to_trace_item(parsed: dict, compact_max: int = 0) -> TraceItem:
@@ -370,6 +433,7 @@ async def search_logs(
 ) -> SearchResult:
     """按关键词搜索日志，支持时间范围和级别过滤"""
     limit = min(limit, settings.limits.max_lines)
+    level = _normalize_level(level)
 
     now = datetime.now()
     if end_time:
@@ -417,7 +481,7 @@ async def search_logs(
                 include_full_lines=include_full,
             )
         elif level:
-            pattern = f"{level.upper()}.*{keyword}|{keyword}.*{level.upper()}"
+            pattern = _level_keyword_pattern(level, keyword)
             results = await file_adapter.grep_files(
                 files,
                 pattern,
@@ -433,9 +497,13 @@ async def search_logs(
                 include_full_lines=include_full,
             )
 
-        total = len(results)
-        truncated = total >= limit
-        items = _grep_results_to_items(results, include_full=include_full)
+        items = _filter_items(
+            _grep_results_to_items(results, include_full=include_full),
+            service=service,
+            level=level,
+        )
+        total = len(items)
+        truncated = len(results) >= limit
 
         _audit("search_logs", params, total, truncated)
         return SearchResult(
@@ -479,19 +547,24 @@ async def tail_errors(
         if service:
             pattern = _service_log_pattern(service, level="ERR", keyword=keyword)
         else:
-            pattern = f"ERR.*{keyword}" if keyword else "ERR"
+            pattern = _level_keyword_pattern("ERR", keyword)
+        raw_limit = _tail_scan_limit(limit, has_app_filter=True)
         results = await file_adapter.grep_files(
             files,
             pattern,
-            limit,
+            raw_limit,
             ["-E"],
             from_end=True,
             include_full_lines=include_full,
         )
 
-        total = len(results)
-        truncated = total >= limit
-        items = _grep_results_to_items(results, include_full=include_full)
+        items = _filter_items(
+            _grep_results_to_items(results, include_full=include_full),
+            service=service,
+            level="ERR",
+        )[-limit:]
+        total = len(items)
+        truncated = len(results) >= raw_limit or total >= limit
 
         _audit("tail_errors", params, total, truncated)
         return SearchResult(
@@ -518,9 +591,11 @@ async def tail_service_logs(
     keyword: str | None = None,
     limit: int = 200,
     include_full: bool = False,
+    exclude_noise: bool = False,
 ) -> SearchResult:
     """按服务查看最近日志。"""
     limit = min(limit, settings.limits.max_lines)
+    level = _normalize_level(level)
     params = {
         "service": service,
         "hours_back": hours_back,
@@ -528,6 +603,7 @@ async def tail_service_logs(
         "keyword": keyword,
         "limit": limit,
         "include_full": include_full,
+        "exclude_noise": exclude_noise,
     }
 
     try:
@@ -541,18 +617,24 @@ async def tail_service_logs(
             )
 
         pattern = _service_log_pattern(service, level=level, keyword=keyword)
+        raw_limit = _tail_scan_limit(limit, has_app_filter=bool(level or exclude_noise))
         results = await file_adapter.grep_files(
             files,
             pattern,
-            limit,
+            raw_limit,
             ["-E"],
             from_end=True,
             include_full_lines=include_full,
         )
 
-        total = len(results)
-        truncated = total >= limit
-        items = _grep_results_to_items(results, include_full=include_full)
+        items = _filter_items(
+            _grep_results_to_items(results, include_full=include_full),
+            service=service,
+            level=level,
+            exclude_noise=exclude_noise,
+        )[-limit:]
+        total = len(items)
+        truncated = len(results) >= raw_limit or total >= limit
 
         _audit("tail_service_logs", params, total, truncated)
         return SearchResult(

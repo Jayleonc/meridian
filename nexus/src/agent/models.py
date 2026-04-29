@@ -35,6 +35,31 @@ class ChatSession(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
 
 
+class ChatSessionSummary(BaseModel):
+    id: str
+    title: str
+    created_at: float
+    updated_at: float
+    message_count: int = 0
+    last_message_role: str | None = None
+    last_message_preview: str = ""
+
+
+class ChatSessionListResponse(BaseModel):
+    sessions: list[ChatSessionSummary]
+
+
+class ChatMessageSearchHit(BaseModel):
+    session_id: str
+    session_title: str
+    message: ChatMessage
+
+
+class ChatMessageSearchResponse(BaseModel):
+    query: str
+    matches: list[ChatMessageSearchHit]
+
+
 class CreateSessionRequest(BaseModel):
     title: str | None = None
 

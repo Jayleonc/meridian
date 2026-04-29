@@ -110,6 +110,7 @@ async def tail_service_logs(
     level: str | None = None,
     keyword: str | None = None,
     limit: int = 50,
+    exclude_noise: bool = False,
 ) -> str:
     """按服务查看最近日志。适用于：用户想直接看某个服务的日志。
 
@@ -119,8 +120,9 @@ async def tail_service_logs(
         level: 可选日志级别 (INF/WAR/ERR/DBG)
         keyword: 可选关键词过滤
         limit: 最大返回条数，默认50，上限500
+        exclude_noise: 是否隐藏 Register / heartbeat / keepalive 这类普通信息噪音
     """
-    result = await log_service.tail_service_logs(service, hours_back, level, keyword, limit)
+    result = await log_service.tail_service_logs(service, hours_back, level, keyword, limit, exclude_noise=exclude_noise)
     return _with_token_stats(json.dumps(result.model_dump(), ensure_ascii=False))
 
 

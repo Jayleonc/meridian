@@ -84,6 +84,7 @@ export default function ProbePage() {
   const [serviceLimit, setServiceLimit] = useState(200);
   const [serviceLevel, setServiceLevel] = useState("");
   const [serviceKeyword, setServiceKeyword] = useState("");
+  const [serviceExcludeNoise, setServiceExcludeNoise] = useState(true);
   const [serviceResult, setServiceResult] = useState<SearchResult | null>(null);
   const [serviceLoading, setServiceLoading] = useState(false);
   const [serviceSource, setServiceSource] = useState("");
@@ -98,18 +99,28 @@ export default function ProbePage() {
     }
   }
 
-  async function loadServiceLogs(service = selectedService) {
+  async function loadServiceLogs(
+    service = selectedService,
+    overrides: Partial<{
+      hoursBack: number;
+      level: string;
+      keyword: string;
+      limit: number;
+      excludeNoise: boolean;
+    }> = {}
+  ) {
     const name = service.trim();
     if (!name) return;
     setSelectedService(name);
     setServiceLoading(true);
     try {
       const r = await probe.tailService(name, {
-        hoursBack: serviceHoursBack,
-        level: serviceLevel || undefined,
-        keyword: serviceKeyword.trim() || undefined,
-        limit: serviceLimit,
+        hoursBack: overrides.hoursBack ?? serviceHoursBack,
+        level: (overrides.level ?? serviceLevel) || undefined,
+        keyword: (overrides.keyword ?? serviceKeyword).trim() || undefined,
+        limit: overrides.limit ?? serviceLimit,
         includeFull: true,
+        excludeNoise: overrides.excludeNoise ?? serviceExcludeNoise,
       });
       setServiceResult(r);
     } catch (e) {
@@ -310,9 +321,6 @@ export default function ProbePage() {
               <select className="input" style={{ width: 130 }} value={errorLimit} onChange={(e) => setErrorLimit(Number(e.target.value))}>
                 {[50, 100, 200, 500].map((n) => <option key={n} value={n}>最新 {n} 条</option>)}
               </select>
-              <button className="btn btn-ghost btn-sm" onClick={() => copyLogs(errorData ?? null, "错误日志")} disabled={!errorData?.items.length}>
-                复制日志
-              </button>
               {errorLoading && <span className="badge badge-amber"><span className="spinner" /> 刷新中</span>}
               {errorData && (
                 <>
@@ -460,17 +468,44 @@ export default function ProbePage() {
                   onChange={(e) => setSelectedService(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && loadServiceLogs()}
                 />
-                <select className="input" style={{ width: 140 }} value={serviceHoursBack} onChange={(e) => setServiceHoursBack(Number(e.target.value))}>
+                <select
+                  className="input"
+                  style={{ width: 140 }}
+                  value={serviceHoursBack}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    setServiceHoursBack(next);
+                    if (selectedService.trim()) void loadServiceLogs(selectedService, { hoursBack: next });
+                  }}
+                >
                   {[1, 2, 4, 8, 12, 24].map((h) => <option key={h} value={h}>最近 {h} 小时</option>)}
                 </select>
-                <select className="input" style={{ width: 120 }} value={serviceLevel} onChange={(e) => setServiceLevel(e.target.value)}>
+                <select
+                  className="input"
+                  style={{ width: 120 }}
+                  value={serviceLevel}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setServiceLevel(next);
+                    if (selectedService.trim()) void loadServiceLogs(selectedService, { level: next });
+                  }}
+                >
                   <option value="">全部级别</option>
                   <option value="ERR">ERR</option>
                   <option value="WAR">WAR</option>
                   <option value="INF">INF</option>
                   <option value="DBG">DBG</option>
                 </select>
-                <select className="input" style={{ width: 130 }} value={serviceLimit} onChange={(e) => setServiceLimit(Number(e.target.value))}>
+                <select
+                  className="input"
+                  style={{ width: 130 }}
+                  value={serviceLimit}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    setServiceLimit(next);
+                    if (selectedService.trim()) void loadServiceLogs(selectedService, { limit: next });
+                  }}
+                >
                   {[50, 100, 200, 500].map((n) => <option key={n} value={n}>返回 {n} 条</option>)}
                 </select>
                 <input
@@ -487,6 +522,18 @@ export default function ProbePage() {
                 <button className="btn btn-ghost btn-sm" onClick={() => copyLogs(serviceResult, "服务日志")} disabled={!serviceResult?.items.length}>
                   复制日志
                 </button>
+                <label className="check-control">
+                  <input
+                    type="checkbox"
+                    checked={serviceExcludeNoise}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      setServiceExcludeNoise(next);
+                      if (selectedService.trim()) void loadServiceLogs(selectedService, { excludeNoise: next });
+                    }}
+                  />
+                  <span>隐藏注册/心跳</span>
+                </label>
               </div>
 
               {serviceResult && (

@@ -36,6 +36,7 @@ class ProbeTailServiceLogsArgs(BaseModel):
     level: str | None = Field(None, description="可选日志级别，例如 ERR、WAR、INF。")
     keyword: str | None = Field(None, description="可选关键词过滤。")
     limit: int = Field(50, ge=1, le=100, description="最多返回条数。")
+    exclude_noise: bool = Field(False, description="是否隐藏 Register / heartbeat / keepalive 这类普通信息噪音。")
 
 
 class ProbeListServicesArgs(BaseModel):

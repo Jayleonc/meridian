@@ -245,7 +245,7 @@ export const probe = {
     ),
   tailService: (
     service: string,
-    opts?: { hoursBack?: number; level?: string; keyword?: string; limit?: number; includeFull?: boolean }
+    opts?: { hoursBack?: number; level?: string; keyword?: string; limit?: number; includeFull?: boolean; excludeNoise?: boolean }
   ) => {
     const q = new URLSearchParams({
       hours_back: String(opts?.hoursBack ?? 1),
@@ -254,6 +254,7 @@ export const probe = {
     });
     if (opts?.level) q.set("level", opts.level);
     if (opts?.keyword) q.set("keyword", opts.keyword);
+    if (opts?.excludeNoise) q.set("exclude_noise", "true");
     return request<SearchResult>(`/api/probe/logs/services/${encodeURIComponent(service)}/tail?${q.toString()}`);
   },
 };

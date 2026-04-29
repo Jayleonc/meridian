@@ -53,6 +53,7 @@ Meridian 的项目级 skills 可以自我进化，但必须受控：只有当一
 
 - `devops.smoke_test`：确认 Console、日志目录和下游服务健康。
 - `devops.tail_service_log`：读取相关服务日志，例如 Probe / Nexus。
+- Agent Chat 卡住、重复回复、工具调用异常或需要回看对话现场时，优先用 DevOps MCP 的 `devops.list_chat_sessions`、`devops.search_chat_messages`、`devops.get_chat_session` 查询平台会话记录；如工具不可用，再检查 `chat_session` / `chat_message` 表与 `/api/chat/*` 路由。
 - Probe 只读工具：`probe.tail_errors`、`probe.search_logs`、`probe.search_by_request_id`、`probe.list_services`。
 - 如果当前环境没有直接可用的 DevOps MCP tool，再用 `scripts/agent_cli.py --nexus-url ... --once ...` 访问 Nexus 暴露的 DevOps MCP。
 - 只有在 DevOps MCP 缺能力、返回事实不足或需要解释根因时，才转入代码阅读、局部复现和实现修复。

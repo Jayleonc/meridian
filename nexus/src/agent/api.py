@@ -10,7 +10,10 @@ from fastapi import APIRouter, HTTPException
 from src.agent.config import AGENT_TURN_TIMEOUT_SECONDS, get_chat_config
 from src.agent.models import (
     ChatConfig,
+    ChatMessageSearchHit,
+    ChatMessageSearchResponse,
     ChatSession,
+    ChatSessionListResponse,
     ChatTurnResponse,
     CreateSessionRequest,
     ModelProviderError,
@@ -35,6 +38,28 @@ def create_chat_router(tool_executor: ToolExecutor, session_store: SessionStore 
     @router.post("/sessions", response_model=ChatSession)
     async def create_session(request: CreateSessionRequest | None = None) -> ChatSession:
         return await sessions.create(request.title if request else None)
+
+    @router.get("/sessions", response_model=ChatSessionListResponse)
+    async def list_sessions(limit: int = 20) -> ChatSessionListResponse:
+        return ChatSessionListResponse(sessions=await sessions.list_recent(limit))
+
+    @router.get("/messages/search", response_model=ChatMessageSearchResponse)
+    async def search_messages(q: str, limit: int = 20) -> ChatMessageSearchResponse:
+        query = q.strip()
+        if not query:
+            raise HTTPException(status_code=400, detail="Search query is required")
+        matches = await sessions.search_messages(query, limit)
+        return ChatMessageSearchResponse(
+            query=query,
+            matches=[
+                ChatMessageSearchHit(
+                    session_id=session.id,
+                    session_title=session.title,
+                    message=message,
+                )
+                for session, message in matches
+            ],
+        )
 
     @router.get("/sessions/{session_id}", response_model=ChatSession)
     async def get_session(session_id: str) -> ChatSession:

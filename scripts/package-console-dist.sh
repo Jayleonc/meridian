@@ -23,6 +23,17 @@ if [[ ! -f console/dist/index.html ]]; then
 fi
 
 mkdir -p "$(dirname "$OUTPUT")"
-tar -C console -czf "$OUTPUT" dist
+
+tar_args=(
+    --exclude='dist/._*'
+    --exclude='dist/**/._*'
+    --exclude='dist/.DS_Store'
+    --exclude='dist/**/.DS_Store'
+)
+if tar --help 2>/dev/null | grep -q -- '--no-xattrs'; then
+    tar_args+=(--no-xattrs)
+fi
+
+COPYFILE_DISABLE=1 tar "${tar_args[@]}" -C console -czf "$OUTPUT" dist
 
 echo "✅ Console dist 已打包: $OUTPUT"
