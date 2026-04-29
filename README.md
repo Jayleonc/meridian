@@ -75,6 +75,8 @@ user: root
 password: jayleonc
 ```
 
+业务 MySQL 按只读边界接入：Atlas 只查询 `information_schema` 采集表结构，Lens 的 MySQL adapter 会拒绝非 `SELECT`、多语句、没有 `LIMIT` 或包含写入/管理类关键字的 SQL。开发环境即使暂时拿到读写账号，应用层也不应执行写入；正式或长期开发环境仍建议给 Meridian 单独创建只授予 `SELECT` 的数据库账号。
+
 如果开发服务器 Node 版本太旧，可以直接使用仓库内预构建的 Console 静态产物：
 
 ```bash

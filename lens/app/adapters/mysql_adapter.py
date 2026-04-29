@@ -4,10 +4,41 @@
 """
 
 import logging
+import re
 
 import aiomysql
 
 logger = logging.getLogger("lens.mysql")
+
+_MUTATING_SQL_RE = re.compile(
+    r"\b("
+    r"ALTER|ANALYZE|CALL|CREATE|DELETE|DROP|GRANT|INSERT|LOAD|LOCK|"
+    r"OPTIMIZE|RENAME|REPLACE|REVOKE|SET|TRUNCATE|UNLOCK|UPDATE"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _readonly_rejection_reason(sql: str) -> str | None:
+    stripped = sql.strip()
+    if not stripped:
+        return "空 SQL"
+
+    body = stripped[:-1].strip() if stripped.endswith(";") else stripped
+    if ";" in body:
+        return "多语句 SQL"
+
+    sql_upper = body.upper()
+    if not sql_upper.startswith("SELECT"):
+        return "非 SELECT 查询"
+
+    if _MUTATING_SQL_RE.search(body):
+        return "包含写入或管理类 SQL 关键字"
+
+    if "LIMIT" not in sql_upper:
+        return "没有 LIMIT 的查询"
+
+    return None
 
 
 class MySQLAdapter:
@@ -88,13 +119,9 @@ class MySQLAdapter:
             logger.warning("[%s] MySQL 连接池不可用", self._name)
             return []
 
-        sql_upper = sql.strip().upper()
-        if not sql_upper.startswith("SELECT"):
-            logger.error("[%s] 拒绝执行非 SELECT 查询: %s", self._name, sql[:100])
-            return []
-
-        if "LIMIT" not in sql_upper:
-            logger.error("[%s] 拒绝执行没有 LIMIT 的查询: %s", self._name, sql[:100])
+        rejection_reason = _readonly_rejection_reason(sql)
+        if rejection_reason is not None:
+            logger.error("[%s] 拒绝执行 %s: %s", self._name, rejection_reason, sql[:100])
             return []
 
         try:
