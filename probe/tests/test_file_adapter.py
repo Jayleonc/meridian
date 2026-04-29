@@ -190,3 +190,24 @@ def test_tail_summary_marks_stale_latest_match(tmp_path, monkeypatch):
     assert summary["stale"] is True
     assert summary["latest_age_seconds"] > 2700
     assert "不代表服务当前仍在产生日志" in summary["hint"]
+
+
+def test_context_strips_ansi_sequences(tmp_path, monkeypatch):
+    log_file = tmp_path / "2026042916.log"
+    log_file.write_text(
+        "\n".join(
+            [
+                "dbproxy(1,1) 04-29T16:34:33.0443 \x1b[92mINF rpc.go:1546:\x1b[0m ctx ok",
+                "wwbase(1,1) 04-29T16:34:33.0445 [92mINF rpc.go:1546:[0m ctx ok",
+            ]
+        )
+    )
+    monkeypatch.setattr(file_adapter.settings.paths, "hourly_log_dir", str(tmp_path))
+
+    result = log_service.get_context(str(log_file), line_number=1, before=0, after=1)
+
+    assert "\x1b" not in result["context"]["match"]
+    assert "[92m" not in result["context"]["match"]
+    assert "[0m" not in result["context"]["match"]
+    assert "[92m" not in result["context"]["after"][0]
+    assert "[0m" not in result["context"]["after"][0]

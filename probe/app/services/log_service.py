@@ -12,12 +12,13 @@ from datetime import datetime, timedelta
 from app.adapters import file_adapter, glog_adapter
 from app.core.config import settings
 from app.schemas.probe import LogItem, SearchResult, TraceItem, TraceSummary
-from app.utils.log_parser import parse_log_line, _truncate, _strip_rpc_body
+from app.utils.log_parser import parse_log_line, _clean_ansi, _truncate, _strip_rpc_body
 from app.utils.redact import redact_text
 
 
 def _maybe_redact(text: str) -> str:
     """按配置决定是否脱敏"""
+    text = _clean_ansi(text)
     if settings.security.redact_enabled:
         return redact_text(text)
     return text
@@ -723,10 +724,9 @@ def get_context(file: str, line_number: int, before: int = 10, after: int = 10) 
     params = {"file": file, "line_number": line_number, "before": before, "after": after}
     try:
         ctx = file_adapter.read_context(file, line_number, before, after)
-        if settings.security.redact_enabled:
-            ctx["before"] = [redact_text(line) for line in ctx["before"]]
-            ctx["match"] = redact_text(ctx["match"])
-            ctx["after"] = [redact_text(line) for line in ctx["after"]]
+        ctx["before"] = [_maybe_redact(line) for line in ctx["before"]]
+        ctx["match"] = _maybe_redact(ctx["match"])
+        ctx["after"] = [_maybe_redact(line) for line in ctx["after"]]
 
         _audit("context_around_match", params, 1, False)
         return {

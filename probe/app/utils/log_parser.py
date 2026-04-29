@@ -21,8 +21,8 @@ LOG_PATTERN = re.compile(
     r"\s+(.*)"                             # 消息正文
 )
 
-# ANSI 转义序列清理
-ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+# ANSI 转义序列清理。浏览器中 ESC 可能不可见，只剩 `[92m` 这类残片，也一并清掉。
+ANSI_ESCAPE = re.compile(r"(?:\x1b)?\[[0-9;]*m")
 
 
 def _truncate(text: str, max_len: int = 0) -> str:
