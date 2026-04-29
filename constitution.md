@@ -4,6 +4,43 @@
 >
 > 本文档优先级高于任何 spec 或 plan。当它们冲突时，以本文档为准。
 
+## 0. 产品与运行边界
+
+### 0.1 单入口与服务边界
+
+- Nexus 是唯一外部入口；开发服务器和默认部署只对外暴露 `3000`。
+- Atlas、Probe、Lens、Trace 等后端服务默认只绑定内部地址，由 Nexus 转发访问。
+- Console 通过 Nexus 访问后端；本地 Vite 代理也应指向 Nexus，不直接绕过 Nexus 调 Atlas / Probe / Lens。
+- 服务间通过 MCP / HTTP API 交互，不共享进程内状态。
+
+### 0.2 组件职责
+
+- Atlas 是环境索引层：服务发现、运行时元数据、数据库 schema、语义标注。
+- Probe 是日志证据层：读取、搜索、关联日志证据；不擅自变成长期日志存储系统。
+- Lens 是只读业务数据查询层：通过 DSL 和 adapter 控制查询边界，不执行写入 SQL。
+- Trace 是链路关联层：负责 request_id、服务节点、时间窗口等关联证据。
+- Agent runtime 负责编排会话、模型 provider、工具调用和证据组织。
+- Codex 是诊断知识库，不直接处置生产系统。
+
+### 0.3 数据归属
+
+- 业务数据库是外部系统数据源，Meridian 只读访问。
+- Meridian 平台数据库固定使用 PostgreSQL，承载自身状态、快照、标注、审计和会话等平台数据。
+- Probe 当前实时查询服务日志文件；除非有明确设计决策，不把业务日志全文写入 PostgreSQL。
+- AI 是证据组织者和诊断助手，不是未经确认的自动处置者。
+
+### 0.4 Provider 与运行时来源
+
+- 模型供应商必须藏在 provider / adapter 后面，不能把 Meridian 绑定到单一供应商 SDK。
+- Supervisor、Docker、Systemd、Kubernetes、静态配置等运行时来源应作为 Atlas discovery provider，不应写死在上层业务逻辑里。
+- DevOps MCP 是开发者观察面，通过 Nexus 暴露只读运行状态、日志、配置和 smoke test；默认不得混入面向用户的 Agent Chat 工具面，也不得绕过审批执行写操作。
+
+### 0.5 本地状态与配置
+
+- `deploy/dev-server/*.config.yaml` 是可被 `git pull` 覆盖的模板兜底，不承载服务器真实账号、密码、日志路径等本地状态。
+- 真实服务器配置应放在 `.meridian/config/*.config.yaml`、`deploy/dev-server/*.config.local.yaml`，或通过 `MERIDIAN_ATLAS_CONFIG` / `MERIDIAN_PROBE_CONFIG` / `MERIDIAN_LENS_CONFIG` 显式指向外部路径。
+- 如果拉代码后出现数据库认证失败、日志路径异常或类似 `using password: NO`，先检查 `dev-server.sh` 启动日志打印的实际配置路径，再判断是否缺少本地覆盖配置。
+
 ## 1. Python 微服务最佳实践
 
 ### 1.1 分层架构（每个服务必须遵守）

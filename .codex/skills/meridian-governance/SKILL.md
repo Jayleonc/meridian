@@ -21,6 +21,7 @@ Meridian 的项目级 skills 可以自我进化，但必须受控：只有当一
 
 开始 Meridian 任务时，只读取必要上下文：
 
+- `constitution.md`
 - `README.md`
 - `docs/ROADMAP.md`
 - `docs/DECISIONS.md`
@@ -71,19 +72,9 @@ Meridian 的项目级 skills 可以自我进化，但必须受控：只有当一
 
 ### 4. 检查架构边界
 
-Meridian 默认边界如下：
+Meridian 的长期硬边界由根目录 `constitution.md` 定义。实现前检查当前请求是否触碰其中的产品、运行、数据、配置或 provider 边界。
 
-- Console 通过 Nexus 访问后端；本地 Vite 代理也应指向 Nexus。
-- Nexus 是唯一外部入口，开发服务器只暴露 `3000`。
-- Atlas 是环境索引层：服务发现、运行时元数据、数据库 schema、语义标注。
-- Probe 是日志证据层。
-- Lens 是只读业务数据查询层，通过 DSL 控制查询边界。
-- Agent runtime 负责会话、模型 provider 适配、工具编排。
-- DevOps MCP 是开发者观察面：通过 Nexus 暴露只读运行状态、日志、配置和 smoke test；默认不得混入面向用户的 Agent Chat 工具面。
-- 模型供应商必须藏在适配器后面，不能把 Meridian 绑定到单一供应商 SDK。
-- Supervisor、Docker、Kubernetes 等运行时来源都应作为 Atlas discovery provider，不应写死。
-
-如果用户请求会破坏这些边界，要指出风险，并选择保持边界清晰的实现路径。
+如果用户请求会破坏 `constitution.md`，要指出风险，并选择保持边界清晰的实现路径。只有用户明确要修改项目原则时，才更新 `constitution.md`，并同步必要的决策记录。
 
 ### 5. 实现
 
@@ -105,6 +96,7 @@ Meridian 默认边界如下：
 - `docs/DECISIONS.md`：架构承诺、边界决策、供应商策略
 - `docs/ARCHITECTURE.md`：组件职责、核心流程变化
 - `README.md`：命令、端口、环境变量、使用方式
+- `constitution.md`：长期硬边界、不可变原则或安全基线变化
 - 相关 `docs/specs/*-spec.md`：只有规格本身变化时才更新
 
 不要随便新建没人维护的计划文档。优先更新现有路线图和决策记录。
@@ -142,7 +134,7 @@ Hermes 是 Meridian 的项目级 skill 自我进化机制。它的目标是让�
 如果命中以上任一项，执行受控进化：
 
 1. 用一句话描述触发原因。
-2. 修改最小必要的项目级 skill 内容。
+2. 判断这是项目原则变化还是执行流程变化；原则进 `constitution.md`，流程才进项目级 skill。
 3. 如涉及架构承诺，同步 `docs/DECISIONS.md`。
 4. 如涉及推进顺序，同步 `docs/ROADMAP.md`。
 5. 运行 skill 校验。
@@ -152,8 +144,8 @@ Hermes 是 Meridian 的项目级 skill 自我进化机制。它的目标是让�
 
 - 不要在没有真实触发事件时主动扩写 skill。
 - 不要把临时偏好写成长期规则。
-- 不要在 skill 中复制大段项目文档；只记录治理流程和关键边界。
-- 不要把用户级 skill 当作 Meridian 权威规则；项目级 `.codex/skills/*` 才是权威。
+- 不要在 skill 中复制大段项目文档或硬边界；skill 只记录治理流程，长期边界以 `constitution.md` 为权威。
+- 不要把用户级 skill 当作 Meridian 权威规则；根目录 `constitution.md` 和项目级 `.codex/skills/*` 才是权威，其中原则优先看 `constitution.md`。
 
 ## 路线图纪律
 

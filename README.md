@@ -2,6 +2,8 @@
 
 MCP（Model Context Protocol）驱动的智能运维观测平台。
 
+长期工程边界和不可变原则见 [`constitution.md`](constitution.md)。当 README、spec、plan 与宪法冲突时，以宪法为准。
+
 ## 项目结构
 
 | 模块 | 职责 |
@@ -77,7 +79,7 @@ password: jayleonc
 
 业务 MySQL 按只读边界接入：Atlas 只查询 `information_schema` 采集表结构，Lens 的 MySQL adapter 会拒绝非 `SELECT`、多语句、没有 `LIMIT` 或包含写入/管理类关键字的 SQL。开发环境即使暂时拿到读写账号，应用层也不应执行写入；正式或长期开发环境仍建议给 Meridian 单独创建只授予 `SELECT` 的数据库账号。
 
-开发服务器使用独立配置文件，不和模块本地 `settings/config.yaml` 混用：
+开发服务器使用独立配置文件，不和模块本地 `settings/config.yaml` 混用。仓库内的默认配置是模板兜底：
 
 ```text
 deploy/dev-server/atlas.config.yaml
@@ -85,7 +87,27 @@ deploy/dev-server/probe.config.yaml
 deploy/dev-server/lens.config.yaml
 ```
 
-`dev-server.sh` 会默认设置 `MERIDIAN_ATLAS_CONFIG`、`MERIDIAN_PROBE_CONFIG` 和 `MERIDIAN_LENS_CONFIG` 指向这些文件。Probe 默认按 `Asia/Shanghai` 业务日志时区查找 `/data/brick/log/YYYYMMDDHH.log` 小时文件；如果服务器日志文件名使用其他时区，修改 `deploy/dev-server/probe.config.yaml` 的 `time.log_timezone`。Atlas 在开发服务器配置中不会每次启动都重新全量采集业务 MySQL，而是优先从 Meridian PostgreSQL 恢复最近一次 schema 快照；需要重新采集时再通过 Console / API / MCP 手动 refresh。
+服务器真实数据库账号、密码和日志路径不要直接改 tracked 的 `deploy/dev-server/*.config.yaml`，否则 `git pull` 可能覆盖。`dev-server.sh` 会按下面顺序选择配置：
+
+```text
+.meridian/config/{atlas,probe,lens}.config.yaml
+deploy/dev-server/{atlas,probe,lens}.config.local.yaml
+deploy/dev-server/{atlas,probe,lens}.config.yaml
+```
+
+推荐在服务器上把真实配置放到 `.meridian/config/`：
+
+```bash
+mkdir -p .meridian/config
+cp deploy/dev-server/lens.config.yaml .meridian/config/lens.config.yaml
+cp deploy/dev-server/atlas.config.yaml .meridian/config/atlas.config.yaml
+cp deploy/dev-server/probe.config.yaml .meridian/config/probe.config.yaml
+# 然后只编辑 .meridian/config/*.config.yaml 中的真实账号、密码和路径
+```
+
+也可以显式设置 `MERIDIAN_ATLAS_CONFIG`、`MERIDIAN_PROBE_CONFIG`、`MERIDIAN_LENS_CONFIG` 指向任意外部路径。Probe 默认按 `Asia/Shanghai` 业务日志时区查找 `/data/brick/log/YYYYMMDDHH.log` 小时文件；如果服务器日志文件名使用其他时区，修改本地覆盖配置的 `time.log_timezone`。Atlas 在开发服务器配置中不会每次启动都重新全量采集业务 MySQL，而是优先从 Meridian PostgreSQL 恢复最近一次 schema 快照；需要重新采集时再通过 Console / API / MCP 手动 refresh。
+
+启动时如果看到 `使用仓库模板配置` 警告，说明当前服务没有命中本地覆盖配置；生产或共享服务器上应先补 `.meridian/config/*.config.yaml`。例如 MySQL 日志里出现 `using password: NO`，通常就是 Lens 读到了模板里的空密码配置。
 
 如果开发服务器 Node 版本太旧，可以直接使用仓库内预构建的 Console 静态产物：
 

@@ -9,6 +9,7 @@ console/dist/
 .DS_Store
 .meridian/
 .claude/settings.local.json
+deploy/dev-server/*.local.yaml
 *.log
 .pytest_cache/
 .ruff_cache/

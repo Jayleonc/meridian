@@ -45,15 +45,40 @@ elif [[ ! -f console/dist/index.html ]]; then
     exit 1
 fi
 
+dev_config_path() {
+    local svc="$1"
+    local tracked="$PWD/deploy/dev-server/${svc}.config.yaml"
+    local local_in_repo="$PWD/deploy/dev-server/${svc}.config.local.yaml"
+    local local_state="$PWD/.meridian/config/${svc}.config.yaml"
+
+    if [[ -f "$local_state" ]]; then
+        printf '%s\n' "$local_state"
+    elif [[ -f "$local_in_repo" ]]; then
+        printf '%s\n' "$local_in_repo"
+    else
+        printf '%s\n' "$tracked"
+    fi
+}
+
+warn_if_template_config() {
+    local svc="$1"
+    local path="$2"
+    local tracked="$PWD/deploy/dev-server/${svc}.config.yaml"
+
+    if [[ "$path" == "$tracked" ]]; then
+        echo "⚠️  ${svc} 使用仓库模板配置；服务器真实配置请放到 .meridian/config/${svc}.config.yaml 或 deploy/dev-server/${svc}.config.local.yaml"
+    fi
+}
+
 export MERIDIAN_NEXUS_HOST="${MERIDIAN_NEXUS_HOST:-0.0.0.0}"
 export MERIDIAN_INTERNAL_HOST="${MERIDIAN_INTERNAL_HOST:-127.0.0.1}"
 export MERIDIAN_REPO_ROOT="${MERIDIAN_REPO_ROOT:-$PWD}"
 export MERIDIAN_SERVICE_LOG_DIR="${MERIDIAN_SERVICE_LOG_DIR:-$PWD/.meridian/logs}"
 export MERIDIAN_RUN_DIR="${MERIDIAN_RUN_DIR:-$PWD/.meridian/run}"
 export MERIDIAN_DEVOPS_ENABLED="${MERIDIAN_DEVOPS_ENABLED:-true}"
-export MERIDIAN_ATLAS_CONFIG="${MERIDIAN_ATLAS_CONFIG:-$PWD/deploy/dev-server/atlas.config.yaml}"
-export MERIDIAN_PROBE_CONFIG="${MERIDIAN_PROBE_CONFIG:-$PWD/deploy/dev-server/probe.config.yaml}"
-export MERIDIAN_LENS_CONFIG="${MERIDIAN_LENS_CONFIG:-$PWD/deploy/dev-server/lens.config.yaml}"
+export MERIDIAN_ATLAS_CONFIG="${MERIDIAN_ATLAS_CONFIG:-$(dev_config_path atlas)}"
+export MERIDIAN_PROBE_CONFIG="${MERIDIAN_PROBE_CONFIG:-$(dev_config_path probe)}"
+export MERIDIAN_LENS_CONFIG="${MERIDIAN_LENS_CONFIG:-$(dev_config_path lens)}"
 
 mkdir -p "$MERIDIAN_SERVICE_LOG_DIR" "$MERIDIAN_RUN_DIR"
 
@@ -68,5 +93,8 @@ echo "🪵 服务日志: ${MERIDIAN_SERVICE_LOG_DIR}"
 echo "🧾 Atlas 配置: ${MERIDIAN_ATLAS_CONFIG}"
 echo "🧾 Probe 配置: ${MERIDIAN_PROBE_CONFIG}"
 echo "🧾 Lens 配置: ${MERIDIAN_LENS_CONFIG}"
+warn_if_template_config atlas "$MERIDIAN_ATLAS_CONFIG"
+warn_if_template_config probe "$MERIDIAN_PROBE_CONFIG"
+warn_if_template_config lens "$MERIDIAN_LENS_CONFIG"
 echo "🧰 DevOps MCP: enabled via Nexus /mcp/stream/"
 exec ./scripts/dev.sh "${args[@]}"
