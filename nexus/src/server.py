@@ -256,6 +256,7 @@ async def _call_chat_tool(name: str, args: dict[str, Any]) -> Any:
                 {
                     "back_hours": args.get("back_hours", 0),
                     "hint_time": args.get("hint_time"),
+                    "include_full": args.get("include_full"),
                 }
             ),
         )

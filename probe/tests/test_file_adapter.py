@@ -138,6 +138,29 @@ async def test_search_by_request_id_falls_back_to_hourly_logs(tmp_path, monkeypa
     assert "ErrTableNotCreate" in result.errors[0].message
 
 
+@pytest.mark.asyncio
+async def test_search_by_request_id_can_return_full_glog_lines(monkeypatch):
+    request_id = "x795vTUEvhiqwxF7krUA"
+
+    async def fake_glog(_request_id: str, _back_hours: int = 0) -> str:
+        return "\n".join(
+            [
+                f"dbproxy(1,1) 04-29T15:39:36.1605 <{request_id}> \x1b[91mERR table_info.go:71:fetchTableColumn\x1b[0m err:errcode 16005, errmsg ErrTableNotCreate",
+                f"dbproxy(1,1) 04-29T15:39:36.1606 \x1b[92mINF rpc.go:1546:\x1b[0m ctx {request_id},,,hlwwmsgreach,172.31.0.16,2,0,0 path /dbproxy/AddObjectType code 0 req {{object_type:{{name:\"hlwwmsgreach.SopSetting\"}}}} rsp {{object_type:null}} time 1",
+            ]
+        )
+
+    monkeypatch.setattr(log_service.glog_adapter, "glog_search", fake_glog)
+
+    result = await log_service.search_by_request_id(request_id, hint_time="15:39:36", include_full=True)
+
+    assert result.total_lines == 2
+    assert len(result.raw_lines) == 2
+    assert "hlwwmsgreach.SopSetting" in result.raw_lines[1]
+    assert "\x1b" not in result.raw_lines[0]
+    assert "[91m" not in result.raw_lines[0]
+
+
 def test_noise_filter_keeps_errors():
     items = log_service._filter_items(
         [

@@ -49,5 +49,6 @@ class TraceSummary(BaseModel):
     errors: list[TraceItem]    # 所有 ERR 日志（完整保留）
     warns: list[TraceItem]     # 所有 WAR 日志（完整保留）
     timeline: list[TraceItem]  # 全链路精简时间线（INF/DBG 级别）
+    raw_lines: list[str] = []   # include_full=true 时返回完整原始日志行（已清理 ANSI / 脱敏）
     hint: str = ""             # 给 Agent 的智能提示（如结果可能不完整时提醒扩大搜索）
     next_actions: list[str] = []

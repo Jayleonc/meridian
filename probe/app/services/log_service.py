@@ -311,6 +311,7 @@ async def search_by_request_id(
     request_id: str,
     back_hours: int = 0,
     hint_time: str | None = None,
+    include_full: bool = False,
 ) -> TraceSummary:
     """
     按 request_id 搜索完整请求链路。
@@ -326,15 +327,21 @@ async def search_by_request_id(
     if hint_time:
         back_hours = _calc_back_hours(hint_time)
 
-    params = {"request_id": request_id, "back_hours": back_hours, "hint_time": hint_time}
+    params = {
+        "request_id": request_id,
+        "back_hours": back_hours,
+        "hint_time": hint_time,
+        "include_full": include_full,
+    }
     try:
         raw = await glog_adapter.glog_search(request_id, back_hours)
         lines = [line for line in raw.splitlines() if line.strip()]
         source = "glog"
         if not lines:
-            lines = await _search_request_id_from_files(request_id, back_hours)
+            lines = await _search_request_id_from_files(request_id, back_hours, include_full=include_full)
             source = "hourly_log_file_fallback"
         total = len(lines)
+        raw_lines = [_maybe_redact(line) for line in lines] if include_full else []
 
         # 分类：错误 / 警告 / 普通
         errors: list[TraceItem] = []
@@ -402,15 +409,21 @@ async def search_by_request_id(
             errors=errors,
             warns=warns,
             timeline=timeline,
+            raw_lines=raw_lines,
             hint=hint,
-            next_actions=["search_logs", "context_around_match"],
+            next_actions=["search_logs", "context_around_match", "search_by_request_id_include_full"],
         )
     except Exception as e:
         _audit("search_by_request_id", params, 0, False, str(e))
         raise
 
 
-async def _search_request_id_from_files(request_id: str, back_hours: int) -> list[str]:
+async def _search_request_id_from_files(
+    request_id: str,
+    back_hours: int,
+    *,
+    include_full: bool = False,
+) -> list[str]:
     """当 glog.sh 查不到时，退回到 Probe 本机小时日志文件搜索。
 
     search_logs 本来就能搜到这类日志；这里把同样的文件证据接入 request_id
@@ -425,7 +438,7 @@ async def _search_request_id_from_files(request_id: str, back_hours: int) -> lis
         files,
         request_id,
         settings.limits.max_lines,
-        include_full_lines=False,
+        include_full_lines=include_full,
     )
     return [line for _, _, line in results]
 

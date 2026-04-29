@@ -45,6 +45,7 @@ async def search_by_request_id(
     request_id: str,
     back_hours: int = 0,
     hint_time: str | None = None,
+    include_full: bool = False,
 ) -> str:
     """【最常用】根据请求ID追踪完整链路。
 
@@ -52,8 +53,9 @@ async def search_by_request_id(
         request_id: 请求ID，如 '7n8dpbl2SRiZmnpytX4A' 或 'SnWCax0iwhiYZPO4RNsA.NWtYBR'
         back_hours: 往前搜索的小时数。0=仅当前小时，有 hint_time 时忽略此参数
         hint_time: 用户提到的请求时间，如 '17:12:40'、'03-18T17:12'，服务端自动计算 back_hours
+        include_full: 是否附带 glog.sh / 文件搜索返回的完整原始日志行
     """
-    result = await log_service.search_by_request_id(request_id, back_hours, hint_time)
+    result = await log_service.search_by_request_id(request_id, back_hours, hint_time, include_full)
     return _with_token_stats(json.dumps(result.model_dump(), ensure_ascii=False))
 
 

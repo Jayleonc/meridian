@@ -105,11 +105,13 @@ async def trace(
     request_id: str,
     back_hours: int = Query(0, ge=0, le=72),
     hint_time: str | None = Query(None),
+    include_full: bool = Query(False),
 ):
     """按 request_id 追踪请求链路"""
     result = await search_by_request_id(
         request_id=request_id,
         back_hours=back_hours,
         hint_time=hint_time,
+        include_full=include_full,
     )
     return result.model_dump()

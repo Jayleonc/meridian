@@ -12,6 +12,7 @@ class ProbeSearchByRequestIdArgs(BaseModel):
     request_id: str = Field(..., description="需要追踪的 request_id。")
     back_hours: int = Field(0, ge=0, le=168, description="向前回溯小时数。0 表示当前小时。")
     hint_time: str | None = Field(None, description="可选时间提示，例如日志发生时间。")
+    include_full: bool = Field(False, description="是否返回 glog.sh / 文件搜索的完整原始日志行。用户要求具体查看或完整日志时设为 true。")
 
 
 class ProbeSearchLogsArgs(BaseModel):
@@ -60,7 +61,7 @@ TOOL_ARG_MODELS: dict[str, type[BaseModel]] = {
 }
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
-    "probe_search_by_request_id": "按 request_id 追踪完整日志链路，适合用户提供 request_id 时使用。",
+    "probe_search_by_request_id": "按 request_id 追踪完整日志链路，适合用户提供 request_id 时使用；用户要求具体查看或完整日志时设置 include_full=true。",
     "probe_search_logs": "按关键词搜索日志，适合查询错误文本、异常类名、业务关键词。",
     "probe_tail_errors": "查看最近错误日志，适合用户询问最近有什么报错或系统是否异常。",
     "probe_tail_service_logs": "按服务名查看最近日志，适合用户想直接查看某个服务的运行日志。",
