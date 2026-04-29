@@ -434,6 +434,8 @@ export const chat = {
     request<ChatSessionListResponse>(`/api/chat/sessions?limit=${limit}`),
   getSession: (sessionId: string) =>
     request<ChatSession>(`/api/chat/sessions/${sessionId}`),
+  sessionEventsUrl: (sessionId: string, after: number, timeoutSeconds = 120) =>
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/events?after=${after}&timeout_seconds=${timeoutSeconds}`,
   sendMessage: (sessionId: string, content: string) =>
     request<ChatTurnResponse>(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",

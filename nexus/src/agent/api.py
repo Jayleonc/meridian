@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from src.agent.config import AGENT_TURN_TIMEOUT_SECONDS, get_chat_config
 from src.agent.models import (
@@ -25,6 +27,8 @@ from src.agent.runtime import AgentRuntime
 from src.agent.sessions import InMemorySessionStore, SessionStore
 
 logger = logging.getLogger(__name__)
+CHAT_EVENT_POLL_SECONDS = 0.5
+CHAT_EVENT_HEARTBEAT_SECONDS = 15
 
 
 class SessionTurnLocks:
@@ -50,6 +54,11 @@ class SessionTurnLocks:
         async with self._guard:
             if self._locks.get(session_id) is lock and not lock.locked():
                 self._locks.pop(session_id, None)
+
+
+def _sse_event(event: str, data: dict) -> str:
+    payload = json.dumps(data, ensure_ascii=False, default=str)
+    return f"event: {event}\ndata: {payload}\n\n"
 
 
 def create_chat_router(tool_executor: ToolExecutor, session_store: SessionStore | None = None) -> APIRouter:
@@ -93,6 +102,55 @@ def create_chat_router(tool_executor: ToolExecutor, session_store: SessionStore 
         if not session:
             raise HTTPException(status_code=404, detail="Chat session not found")
         return session
+
+    @router.get("/sessions/{session_id}/events")
+    async def session_events(
+        session_id: str,
+        request: Request,
+        after: int = Query(0, ge=0),
+        timeout_seconds: int = Query(120, ge=1, le=300),
+    ) -> StreamingResponse:
+        session = await sessions.get(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+
+        async def event_stream():
+            deadline = asyncio.get_running_loop().time() + timeout_seconds
+            next_heartbeat = asyncio.get_running_loop().time() + CHAT_EVENT_HEARTBEAT_SECONDS
+            while asyncio.get_running_loop().time() < deadline:
+                if await request.is_disconnected():
+                    return
+
+                current = await sessions.get(session_id)
+                if not current:
+                    yield _sse_event("error", {"detail": "Chat session not found"})
+                    return
+
+                new_messages = current.messages[after:]
+                if any(message.role == "assistant" for message in new_messages):
+                    yield _sse_event("session", current.model_dump(mode="json"))
+                    return
+
+                now = asyncio.get_running_loop().time()
+                if now >= next_heartbeat:
+                    yield _sse_event("ping", {"session_id": session_id})
+                    next_heartbeat = now + CHAT_EVENT_HEARTBEAT_SECONDS
+                await asyncio.sleep(CHAT_EVENT_POLL_SECONDS)
+
+            latest = await sessions.get(session_id)
+            yield _sse_event(
+                "timeout",
+                latest.model_dump(mode="json") if latest else {"session_id": session_id},
+            )
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @router.post("/sessions/{session_id}/messages", response_model=ChatTurnResponse)
     async def send_message(session_id: str, request: SendMessageRequest) -> ChatTurnResponse:

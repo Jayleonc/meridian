@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import unittest
 
 from fastapi import FastAPI
@@ -129,3 +130,26 @@ class ChatApiConcurrencyTest(unittest.IsolatedAsyncioTestCase):
         messages = response.json()["session"]["messages"]
         self.assertEqual([message["role"] for message in messages], ["user", "assistant"])
         self.assertIn("Agent 响应超时", messages[1]["content"])
+
+    async def test_session_events_streams_assistant_update(self) -> None:
+        created = await self.client.post("/api/chat/sessions", json={"title": "test"})
+        self.assertEqual(created.status_code, 200)
+        session_id = created.json()["id"]
+        self.release.set()
+
+        response = await self.client.post(
+            f"/api/chat/sessions/{session_id}/messages",
+            json={"content": "stream me"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        events = await self.client.get(
+            f"/api/chat/sessions/{session_id}/events?after=1&timeout_seconds=1"
+        )
+
+        self.assertEqual(events.status_code, 200)
+        self.assertIn("text/event-stream", events.headers["content-type"])
+        self.assertIn("event: session", events.text)
+        data_line = next(line for line in events.text.splitlines() if line.startswith("data: "))
+        payload = json.loads(data_line.removeprefix("data: "))
+        self.assertEqual([message["role"] for message in payload["messages"]], ["user", "assistant"])

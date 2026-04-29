@@ -15,6 +15,7 @@ const EXAMPLES = [
   "搜索 timeout 相关日志",
 ];
 const CHAT_SESSION_KEY = "meridian.chat.session_id";
+const TURN_RECONCILE_TIMEOUT_MS = 90000;
 
 function formatToolName(name: string): string {
   if (name.startsWith("probe_")) return name.replace(/^probe_/, "probe.");
@@ -114,6 +115,78 @@ export default function ChatPage() {
     }
   }
 
+  function applySession(next: ChatSession) {
+    window.localStorage.setItem(CHAT_SESSION_KEY, next.id);
+    setSession((current) => {
+      if (current && current.id !== next.id) return current;
+      if (
+        current &&
+        current.id === next.id &&
+        current.messages.some((message) => message.id.startsWith("local_")) &&
+        next.messages.length < current.messages.length
+      ) {
+        return current;
+      }
+      if (current && current.id === next.id && next.updated_at < current.updated_at) {
+        return current;
+      }
+      return next;
+    });
+    setSessions((current) => mergeSessionSummary(current, next));
+  }
+
+  async function waitForAssistantMessage(
+    sessionId: string,
+    baselineMessageCount: number,
+    timeoutMs: number
+  ): Promise<ChatSession> {
+    return new Promise((resolve, reject) => {
+      const source = new EventSource(
+        chat.sessionEventsUrl(sessionId, baselineMessageCount, Math.ceil(timeoutMs / 1000))
+      );
+      let settled = false;
+      const timer = window.setTimeout(() => {
+        finish();
+        reject(new Error("Agent 回复同步超时，请刷新会话或稍后重试"));
+      }, timeoutMs + 3000);
+
+      function finish() {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        source.close();
+      }
+
+      function handleSession(event: MessageEvent<string>) {
+        try {
+          const fresh = JSON.parse(event.data) as ChatSession;
+          setSessions((current) => mergeSessionSummary(current, fresh));
+          const newMessages = fresh.messages.slice(baselineMessageCount);
+          if (newMessages.some((message) => message.role === "assistant")) {
+            finish();
+            resolve(fresh);
+          }
+        } catch (e) {
+          finish();
+          reject(e);
+        }
+      }
+
+      source.addEventListener("session", handleSession);
+      source.addEventListener("timeout", (event) => {
+        handleSession(event as MessageEvent<string>);
+        if (!settled) {
+          finish();
+          reject(new Error("Agent 回复同步超时，请刷新会话或稍后重试"));
+        }
+      });
+      source.addEventListener("error", () => {
+        finish();
+        reject(new Error("Agent 推送连接中断，请刷新会话或稍后重试"));
+      });
+    });
+  }
+
   useEffect(() => {
     let alive = true;
     async function boot() {
@@ -168,6 +241,7 @@ export default function ChatPage() {
     if (!content || !session || sendingRef.current) return;
 
     const sessionId = session.id;
+    const baselineMessageCount = session.messages.length;
     sendingRef.current = true;
     setInput("");
     setSending(true);
@@ -183,19 +257,37 @@ export default function ChatPage() {
     );
 
     try {
-      const result = await chat.sendMessage(sessionId, content);
-      window.localStorage.setItem(CHAT_SESSION_KEY, result.session_id);
-      setSession(result.session);
-      setSessions((current) => mergeSessionSummary(current, result.session));
+      const eventPromise = waitForAssistantMessage(
+        sessionId,
+        baselineMessageCount,
+        TURN_RECONCILE_TIMEOUT_MS
+      );
+      const responsePromise = chat.sendMessage(sessionId, content).then((result) => result.session);
+
+      void eventPromise.then(applySession).catch(() => undefined);
+      void responsePromise.then(applySession).catch(() => undefined);
+
+      const next = await Promise.any([responsePromise, eventPromise]);
+      applySession(next);
     } catch (e) {
-      setSession((current) => {
-        if (!current || current.id !== sessionId) return current;
-        return {
-          ...current,
-          messages: current.messages.filter((message) => message.id !== optimistic.id),
-        };
-      });
-      toast("error", e instanceof Error ? e.message : "消息发送失败");
+      try {
+        applySession(await chat.getSession(sessionId));
+      } catch {
+        setSession((current) => {
+          if (!current || current.id !== sessionId) return current;
+          return {
+            ...current,
+            messages: current.messages.filter((message) => message.id !== optimistic.id),
+          };
+        });
+      }
+      const detail =
+        e instanceof AggregateError
+          ? e.errors.find((item): item is Error => item instanceof Error)?.message
+          : e instanceof Error
+            ? e.message
+            : "";
+      toast("error", detail || "消息发送失败");
     } finally {
       sendingRef.current = false;
       setSending(false);
