@@ -215,6 +215,19 @@ def test_tail_summary_marks_stale_latest_match(tmp_path, monkeypatch):
     assert "不代表服务当前仍在产生日志" in summary["hint"]
 
 
+def test_calc_back_hours_accepts_fractional_log_time(monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            current = datetime(2026, 4, 29, 16, 13, tzinfo=ZoneInfo("Asia/Shanghai"))
+            return current if tz else current.replace(tzinfo=None)
+
+    monkeypatch.setattr(log_service, "datetime", FixedDateTime)
+
+    assert log_service._calc_back_hours("04-29T15:25:34.7873") == 1
+    assert log_service._calc_back_hours("04-29T12:05:01.1234") == 5
+
+
 def test_context_strips_ansi_sequences(tmp_path, monkeypatch):
     log_file = tmp_path / "2026042916.log"
     log_file.write_text(

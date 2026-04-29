@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { chat, type ChatConfig, type ChatMessage, type ChatSession, type ChatToolCall } from "../../api/client";
+import {
+  chat,
+  type ChatConfig,
+  type ChatMessage,
+  type ChatSession,
+  type ChatSessionSummary,
+  type ChatToolCall,
+} from "../../api/client";
 import { useApp } from "../../context/AppContext";
 
 const EXAMPLES = [
@@ -32,10 +39,54 @@ function timeOf(ts: number): string {
   });
 }
 
+function sessionTime(ts: number): string {
+  const date = new Date(ts * 1000);
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  return date.toLocaleString("zh-CN", {
+    month: sameDay ? undefined : "2-digit",
+    day: sameDay ? undefined : "2-digit",
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function roleLabel(role?: string | null): string {
+  if (role === "user") return "你";
+  if (role === "assistant") return "Agent";
+  return "会话";
+}
+
+function summarizeSession(session: ChatSession): ChatSessionSummary {
+  const last = session.messages[session.messages.length - 1];
+  return {
+    id: session.id,
+    title: session.title,
+    created_at: session.created_at,
+    updated_at: session.updated_at,
+    message_count: session.messages.length,
+    last_message_role: last?.role ?? null,
+    last_message_preview: last?.content?.slice(0, 120) ?? "",
+  };
+}
+
+function mergeSessionSummary(
+  sessions: ChatSessionSummary[],
+  session: ChatSession
+): ChatSessionSummary[] {
+  const summary = summarizeSession(session);
+  return [summary, ...sessions.filter((item) => item.id !== session.id)].sort(
+    (a, b) => b.updated_at - a.updated_at
+  );
+}
+
 export default function ChatPage() {
   const { toast } = useApp();
   const [config, setConfig] = useState<ChatConfig | null>(null);
   const [session, setSession] = useState<ChatSession | null>(null);
+  const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
+  const [sessionListLoading, setSessionListLoading] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -47,12 +98,31 @@ export default function ChatPage() {
     return `${config.provider}:${config.model}`;
   }, [config]);
 
+  async function loadSessionList(showToast = true) {
+    setSessionListLoading(true);
+    try {
+      const result = await chat.listSessions(30);
+      setSessions(result.sessions);
+      return result.sessions;
+    } catch (e) {
+      if (showToast) {
+        toast("error", e instanceof Error ? e.message : "会话列表加载失败");
+      }
+      return [];
+    } finally {
+      setSessionListLoading(false);
+    }
+  }
+
   useEffect(() => {
     let alive = true;
     async function boot() {
       setLoading(true);
       try {
-        const cfg = await chat.config();
+        const [cfg, list] = await Promise.all([
+          chat.config(),
+          chat.listSessions(30).catch(() => ({ sessions: [] })),
+        ]);
         const savedSessionId = window.localStorage.getItem(CHAT_SESSION_KEY);
         let activeSession: ChatSession | null = null;
         if (savedSessionId) {
@@ -62,6 +132,10 @@ export default function ChatPage() {
             window.localStorage.removeItem(CHAT_SESSION_KEY);
           }
         }
+        if (!activeSession && list.sessions.length > 0) {
+          activeSession = await chat.getSession(list.sessions[0].id);
+          window.localStorage.setItem(CHAT_SESSION_KEY, activeSession.id);
+        }
         if (!activeSession) {
           activeSession = await chat.createSession("Console Agent");
           window.localStorage.setItem(CHAT_SESSION_KEY, activeSession.id);
@@ -69,6 +143,7 @@ export default function ChatPage() {
         if (!alive) return;
         setConfig(cfg);
         setSession(activeSession);
+        setSessions(mergeSessionSummary(list.sessions, activeSession));
       } catch (e) {
         toast("error", e instanceof Error ? e.message : "Agent 初始化失败");
       } finally {
@@ -111,6 +186,7 @@ export default function ChatPage() {
       const result = await chat.sendMessage(sessionId, content);
       window.localStorage.setItem(CHAT_SESSION_KEY, result.session_id);
       setSession(result.session);
+      setSessions((current) => mergeSessionSummary(current, result.session));
     } catch (e) {
       setSession((current) => {
         if (!current || current.id !== sessionId) return current;
@@ -133,8 +209,24 @@ export default function ChatPage() {
       const created = await chat.createSession("Console Agent");
       window.localStorage.setItem(CHAT_SESSION_KEY, created.id);
       setSession(created);
+      setSessions((current) => mergeSessionSummary(current, created));
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "新建会话失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function openSession(sessionId: string) {
+    if (sendingRef.current || session?.id === sessionId) return;
+    setLoading(true);
+    try {
+      const next = await chat.getSession(sessionId);
+      window.localStorage.setItem(CHAT_SESSION_KEY, next.id);
+      setSession(next);
+      setSessions((current) => mergeSessionSummary(current, next));
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "会话加载失败");
     } finally {
       setLoading(false);
     }
@@ -161,74 +253,129 @@ export default function ChatPage() {
       </div>
 
       <div className="page-body chat-page">
-        <div className="chat-thread" ref={threadRef}>
-          {loading && (
-            <div className="empty">
-              <div className="empty-text">正在加载 Agent 会话</div>
+        <aside className="chat-session-panel">
+          <div className="chat-session-head">
+            <div>
+              <h3>会话</h3>
+              <div className="chat-session-count">{sessions.length} 个最近会话</div>
             </div>
-          )}
+            <button
+              className="btn btn-ghost btn-sm"
+              type="button"
+              onClick={() => void loadSessionList()}
+              disabled={sessionListLoading || sending}
+            >
+              {sessionListLoading ? <span className="spinner" /> : "刷新"}
+            </button>
+          </div>
 
-          {!loading && session?.messages.length === 0 && (
-            <div className="chat-empty">
-              {EXAMPLES.map((example) => (
-                <button
-                  key={example}
-                  className="chat-example"
-                  type="button"
-                  onClick={() => void send(example)}
-                  disabled={sending || !session}
-                >
-                  {example}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="chat-session-list">
+            {sessionListLoading && sessions.length === 0 && (
+              <div className="empty" style={{ padding: 18 }}>
+                <div className="empty-text">正在加载会话</div>
+              </div>
+            )}
 
-          {session?.messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
+            {!sessionListLoading && sessions.length === 0 && (
+              <div className="empty" style={{ padding: 18 }}>
+                <div className="empty-text">还没有历史会话</div>
+              </div>
+            )}
 
-          {sending && (
-            <div className="chat-row assistant">
-              <div className="chat-message">
-                <div className="chat-meta">
-                  <span>Agent</span>
-                  <span className="badge badge-amber"><span className="spinner" /> 思考中</span>
+            {sessions.map((item) => (
+              <button
+                key={item.id}
+                className={`chat-session-item ${session?.id === item.id ? "active" : ""}`}
+                type="button"
+                onClick={() => void openSession(item.id)}
+                disabled={loading || sending}
+                title={item.title}
+              >
+                <div className="chat-session-title">
+                  <span>{item.title}</span>
+                  <time>{sessionTime(item.updated_at)}</time>
+                </div>
+                <div className="chat-session-preview">
+                  {item.last_message_preview
+                    ? `${roleLabel(item.last_message_role)}：${item.last_message_preview}`
+                    : "空会话"}
+                </div>
+                <div className="chat-session-meta">{item.message_count} 条消息</div>
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <div className="chat-workspace">
+          <div className="chat-thread" ref={threadRef}>
+            {loading && (
+              <div className="empty">
+                <div className="empty-text">正在加载 Agent 会话</div>
+              </div>
+            )}
+
+            {!loading && session?.messages.length === 0 && (
+              <div className="chat-empty">
+                {EXAMPLES.map((example) => (
+                  <button
+                    key={example}
+                    className="chat-example"
+                    type="button"
+                    onClick={() => void send(example)}
+                    disabled={sending || !session}
+                  >
+                    {example}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {session?.messages.map((message) => (
+              <MessageBubble key={message.id} message={message} />
+            ))}
+
+            {sending && (
+              <div className="chat-row assistant">
+                <div className="chat-message">
+                  <div className="chat-meta">
+                    <span>Agent</span>
+                    <span className="badge badge-amber"><span className="spinner" /> 思考中</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
 
-        <form
-          className="chat-composer"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void send();
-          }}
-        >
-          <textarea
-            className="input chat-input"
-            aria-label="Agent 消息"
-            placeholder="问 Meridian，例如：最近 1 小时有哪些错误？"
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                void send();
-              }
+          <form
+            className="chat-composer"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void send();
             }}
-            disabled={loading || sending || !session}
-          />
-          <button
-            className="btn btn-primary chat-send"
-            type="submit"
-            disabled={loading || sending || !input.trim() || !session}
           >
-            {sending ? <><span className="spinner" /> 发送中</> : "发送"}
-          </button>
-        </form>
+            <textarea
+              className="input chat-input"
+              aria-label="Agent 消息"
+              placeholder="问 Meridian，例如：最近 1 小时有哪些错误？"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  void send();
+                }
+              }}
+              disabled={loading || sending || !session}
+            />
+            <button
+              className="btn btn-primary chat-send"
+              type="submit"
+              disabled={loading || sending || !input.trim() || !session}
+            >
+              {sending ? <><span className="spinner" /> 发送中</> : "发送"}
+            </button>
+          </form>
+        </div>
       </div>
     </>
   );

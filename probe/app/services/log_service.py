@@ -278,9 +278,10 @@ def _calc_back_hours(hint_time: str) -> int:
 
     # 尝试各种格式
     for fmt in (
-        "%H:%M:%S", "%H:%M",
+        "%H:%M:%S.%f", "%H:%M:%S", "%H:%M",
+        "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d %H:%M:%S.%f",
         "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M",
-        "%m-%dT%H:%M:%S", "%m-%dT%H:%M",
+        "%m-%dT%H:%M:%S.%f", "%m-%dT%H:%M:%S", "%m-%dT%H:%M",
     ):
         try:
             parsed = datetime.strptime(hint, fmt)

@@ -60,7 +60,7 @@ cp .env.example .env
 http://<dev-server>:3000
 ```
 
-Console 静态资源由 Nexus 托管，Console 的所有后端请求仍走 `/api/*`、`/svc/*`、`/api/chat/*`、`/mcp/*`，不需要额外开放 `3010`。Probe 页面支持按服务查看日志：从服务列表、Trace 服务节点或 Atlas 服务表点击服务名，会跳到 `/probe?tab=service&svc=<service>` 并直接读取该服务最近日志。
+Console 静态资源由 Nexus 托管，Console 的所有后端请求仍走 `/api/*`、`/svc/*`、`/api/chat/*`、`/mcp/*`，不需要额外开放 `3010`。Probe 页面支持按服务查看日志：从服务列表、Trace 服务节点或 Atlas 服务表点击服务名，会跳到 `/probe?tab=service&svc=<service>` 并直接读取该服务最近日志；从日志行点击“追踪”时会携带该行日志时间，自动换算 request_id 查询需要的 `glog.sh -b` 回看小时数。
 
 如果开发服务器没有 PostgreSQL，可以只用 Docker 启动 Meridian 平台库，不需要重启 Docker daemon：
 
@@ -198,7 +198,7 @@ Console 本地开发同样经由 Nexus 转发后端请求，不再直接连接 A
 
 ## Agent Chat
 
-Console 的 `Agent` 页面调用 Nexus 的 `/api/chat/*`。这套接口是 Meridian 自己的会话协议，不绑定 OpenAI Responses / Agents SDK。
+Console 的 `Agent` 页面调用 Nexus 的 `/api/chat/*`。这套接口是 Meridian 自己的会话协议，不绑定 OpenAI Responses / Agents SDK。页面左侧会列出最近会话，支持从历史会话继续排障；刷新后优先恢复最近一次打开的会话。
 
 首期模型层通过 LangChain 适配：
 

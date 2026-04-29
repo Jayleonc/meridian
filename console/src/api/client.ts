@@ -400,6 +400,20 @@ export interface ChatSession {
   messages: ChatMessage[];
 }
 
+export interface ChatSessionSummary {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  message_count: number;
+  last_message_role?: string | null;
+  last_message_preview: string;
+}
+
+export interface ChatSessionListResponse {
+  sessions: ChatSessionSummary[];
+}
+
 export interface ChatTurnResponse {
   session_id: string;
   provider: string;
@@ -416,6 +430,8 @@ export const chat = {
       method: "POST",
       body: JSON.stringify({ title }),
     }),
+  listSessions: (limit = 30) =>
+    request<ChatSessionListResponse>(`/api/chat/sessions?limit=${limit}`),
   getSession: (sessionId: string) =>
     request<ChatSession>(`/api/chat/sessions/${sessionId}`),
   sendMessage: (sessionId: string, content: string) =>

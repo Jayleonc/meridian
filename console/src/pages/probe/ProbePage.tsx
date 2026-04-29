@@ -8,6 +8,101 @@ import { formatLogTime } from "../../utils/time";
 
 type Tab = "errors" | "search" | "service" | "trace";
 
+const TRACE_BACK_OPTIONS = [0, 1, 2, 4, 8, 12, 24, 48, 72];
+const TRACE_MAX_BACK_HOURS = 72;
+
+function parseTraceTimestamp(timestamp?: string): Date | null {
+  if (!timestamp) return null;
+  const value = timestamp.trim();
+
+  const brick = value.match(/^(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (brick) {
+    const now = new Date();
+    return new Date(
+      now.getFullYear(),
+      Number(brick[1]) - 1,
+      Number(brick[2]),
+      Number(brick[3]),
+      Number(brick[4]),
+      Number(brick[5] ?? 0)
+    );
+  }
+
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (iso) {
+    return new Date(
+      Number(iso[1]),
+      Number(iso[2]) - 1,
+      Number(iso[3]),
+      Number(iso[4]),
+      Number(iso[5]),
+      Number(iso[6] ?? 0)
+    );
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : new Date(parsed);
+}
+
+function normalizeTraceHintTime(timestamp?: string): string {
+  if (!timestamp) return "";
+  const value = timestamp.trim();
+
+  const brick = value.match(/^(\d{2}-\d{2}T\d{2}:\d{2})(?::(\d{2}))?/);
+  if (brick) return `${brick[1]}:${brick[2] ?? "00"}`;
+
+  const iso = value.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})(?::(\d{2}))?/);
+  if (iso) return `${iso[1]}T${iso[2]}:${iso[3] ?? "00"}`;
+
+  return value;
+}
+
+function traceBackHoursFromTimestamp(timestamp?: string): number {
+  const target = parseTraceTimestamp(timestamp);
+  if (!target) return 0;
+
+  let diffMs = Date.now() - target.getTime();
+  if (diffMs < 0) diffMs += 24 * 60 * 60 * 1000;
+  const diffHours = Math.max(0, diffMs / (60 * 60 * 1000));
+  const withBuffer = Math.max(1, Math.floor(diffHours) + 1);
+  return Math.min(TRACE_MAX_BACK_HOURS, withBuffer);
+}
+
+function traceBackHoursFromParams(backHoursParam: string | null, hintTime: string): number {
+  if (backHoursParam !== null) {
+    const parsed = Number(backHoursParam);
+    if (Number.isFinite(parsed)) {
+      return Math.min(TRACE_MAX_BACK_HOURS, Math.max(0, Math.floor(parsed)));
+    }
+  }
+  return traceBackHoursFromTimestamp(hintTime);
+}
+
+function traceBackOptions(current: number) {
+  if (TRACE_BACK_OPTIONS.includes(current)) return TRACE_BACK_OPTIONS;
+  return [...TRACE_BACK_OPTIONS, current].sort((a, b) => a - b);
+}
+
+function traceBackOptionLabel(hours: number, auto: boolean) {
+  if (hours === 0) return "当前小时";
+  if (auto && !TRACE_BACK_OPTIONS.includes(hours)) return `自动回看 ${hours} 小时`;
+  return `回看 ${hours} 小时`;
+}
+
+function traceAutoHintLabel(hintTime: string, backHours: number) {
+  const target = parseTraceTimestamp(hintTime);
+  if (!target) return `按日志时间 ${hintTime}`;
+
+  let diffMs = Date.now() - target.getTime();
+  if (diffMs < 0) diffMs += 24 * 60 * 60 * 1000;
+  const diffMinutes = Math.max(0, Math.round(diffMs / (60 * 1000)));
+  const age =
+    diffMinutes < 90
+      ? `约 ${Math.max(1, diffMinutes)} 分钟前`
+      : `约 ${Math.max(1, Math.round(diffMinutes / 60))} 小时前`;
+  return `${age}，glog.sh -b ${backHours}`;
+}
+
 export default function ProbePage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get("tab") as Tab) || "errors";
@@ -144,27 +239,43 @@ export default function ProbePage() {
   }, [tab, selectedServiceParam]);
 
   // ── Trace ──
-  const initRid = params.get("rid") || "";
-  const [requestId, setRequestId] = useState(initRid);
-  const [backHours, setBackHours] = useState(0);
+  const traceRidParam = params.get("rid") || "";
+  const traceHintParam = params.get("hint_time") || "";
+  const traceBackParam = params.get("back_hours");
+  const [requestId, setRequestId] = useState(traceRidParam);
+  const [backHours, setBackHours] = useState(() =>
+    traceBackHoursFromParams(traceBackParam, traceHintParam)
+  );
+  const [traceHintTime, setTraceHintTime] = useState(traceHintParam);
   const [traceResult, setTraceResult] = useState<TraceSummary | null>(null);
   const [traceLoading, setTraceLoading] = useState(false);
 
   // Auto-trace if rid is in URL
   useEffect(() => {
-    if (initRid && tab === "trace") {
-      setRequestId(initRid);
-      doTrace(initRid);
+    if (traceRidParam && tab === "trace") {
+      const nextBackHours = traceBackHoursFromParams(traceBackParam, traceHintParam);
+      setRequestId(traceRidParam);
+      setTraceHintTime(traceHintParam);
+      setBackHours(nextBackHours);
+      void doTrace(traceRidParam, {
+        backHours: nextBackHours,
+        hintTime: traceHintParam,
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initRid]);
+  }, [tab, traceRidParam, traceHintParam, traceBackParam]);
 
-  async function doTrace(rid?: string) {
+  async function doTrace(
+    rid?: string,
+    options: { backHours?: number; hintTime?: string } = {}
+  ) {
     const id = (rid || requestId).trim();
     if (!id) return;
+    const nextBackHours = options.backHours ?? backHours;
+    const nextHintTime = options.hintTime ?? traceHintTime;
     setTraceLoading(true);
     try {
-      const r = await probe.trace(id, backHours);
+      const r = await probe.trace(id, nextBackHours, nextHintTime || undefined);
       setTraceResult(r);
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "链路查询失败");
@@ -257,11 +368,23 @@ export default function ProbePage() {
 
   function traceLog(item: LogItem) {
     if (item.request_id) {
+      const hintTime = normalizeTraceHintTime(item.timestamp);
+      const nextBackHours = traceBackHoursFromTimestamp(item.timestamp);
+      const query = new URLSearchParams({
+        tab: "trace",
+        rid: item.request_id,
+        back_hours: String(nextBackHours),
+      });
+      if (hintTime) query.set("hint_time", hintTime);
+
+      setRequestId(item.request_id);
+      setTraceHintTime(hintTime);
+      setBackHours(nextBackHours);
       inv.push({
         type: "trace",
         label: item.request_id.slice(0, 16),
-        path: `/probe?tab=trace&rid=${item.request_id}`,
-        data: { request_id: item.request_id },
+        path: `/probe?${query.toString()}`,
+        data: { request_id: item.request_id, hint_time: hintTime, back_hours: nextBackHours },
       });
     }
   }
@@ -581,17 +704,36 @@ export default function ProbePage() {
                 style={{ flex: 1 }}
                 placeholder="输入 request_id"
                 value={requestId}
-                onChange={(e) => setRequestId(e.target.value)}
+                onChange={(e) => {
+                  setRequestId(e.target.value);
+                  setTraceHintTime("");
+                }}
                 onKeyDown={(e) => e.key === "Enter" && doTrace()}
                 autoFocus
               />
-              <select className="input" style={{ width: 140 }} value={backHours} onChange={(e) => setBackHours(Number(e.target.value))}>
-                <option value={0}>当前小时</option>
-                {[1, 2, 4, 8, 12, 24, 48].map((h) => <option key={h} value={h}>回看 {h} 小时</option>)}
+              <select
+                className="input"
+                style={{ width: 160 }}
+                value={backHours}
+                onChange={(e) => {
+                  setBackHours(Number(e.target.value));
+                  setTraceHintTime("");
+                }}
+              >
+                {traceBackOptions(backHours).map((h) => (
+                  <option key={h} value={h}>
+                    {traceBackOptionLabel(h, Boolean(traceHintTime))}
+                  </option>
+                ))}
               </select>
               <button className="btn btn-primary" onClick={() => doTrace()} disabled={traceLoading || !requestId.trim()}>
                 {traceLoading ? <><span className="spinner" /> 查询中</> : "查询链路"}
               </button>
+              {traceHintTime && (
+                <span className="badge badge-amber">
+                  {traceAutoHintLabel(traceHintTime, backHours)}
+                </span>
+              )}
             </div>
 
             {traceResult && <TraceView trace={traceResult} onServiceClick={onTraceServiceClick} />}
@@ -778,9 +920,14 @@ function TraceView({
       <div className="card mb-md">
         <div className="card-head">
           <h3>请求路径</h3>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--t4)" }}>
-            {trace.time_range}
-          </span>
+          <div className="row gap-sm wrap">
+            <span className="badge badge-dim">
+              {trace.searched_hours > 0 ? `已回看 ${trace.searched_hours} 小时` : "当前小时"}
+            </span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--t4)" }}>
+              {trace.time_range}
+            </span>
+          </div>
         </div>
         <div className="card-body">
           <div className="row gap-sm wrap">
