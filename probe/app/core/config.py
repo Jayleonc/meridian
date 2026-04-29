@@ -4,6 +4,7 @@
 从 config.yaml 加载配置，支持默认值。
 """
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,10 @@ class PathsConfig(BaseModel):
     glog_path: str = "/data/pinfire/tools/glog.sh"            # glog.sh 路径
 
 
+class TimeConfig(BaseModel):
+    log_timezone: str = "Asia/Shanghai"       # 小时日志文件名使用的业务日志时区
+
+
 class ServerConfig(BaseModel):
     name: str = "probe"
     environment: str = "dev"
@@ -50,13 +55,17 @@ class Settings(BaseModel):
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    time: TimeConfig = Field(default_factory=TimeConfig)
     atlas: AtlasConfig = Field(default_factory=AtlasConfig)
 
 
 def load_settings(config_path: str | Path | None = None) -> Settings:
     """加载配置文件，找不到则用默认值"""
     if config_path is None:
-        config_path = Path(__file__).parent.parent / "settings" / "config.yaml"
+        config_path = (
+            os.environ.get("MERIDIAN_PROBE_CONFIG")
+            or Path(__file__).parent.parent / "settings" / "config.yaml"
+        )
 
     config_path = Path(config_path)
     if not config_path.exists():

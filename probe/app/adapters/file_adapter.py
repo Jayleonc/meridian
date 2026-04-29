@@ -6,10 +6,21 @@
 """
 
 import asyncio
-from datetime import datetime, timedelta
+import subprocess
+from collections import deque
+from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.core.config import settings
+
+
+def _log_timezone() -> tzinfo:
+    """返回业务日志文件名使用的时区。配置错误时使用本地时区兜底。"""
+    try:
+        return ZoneInfo(settings.time.log_timezone)
+    except ZoneInfoNotFoundError:
+        return datetime.now().astimezone().tzinfo or ZoneInfo("UTC")
 
 
 def get_hourly_files(start_time: datetime, end_time: datetime) -> list[Path]:
@@ -28,7 +39,7 @@ def get_hourly_files(start_time: datetime, end_time: datetime) -> list[Path]:
 
 def get_recent_hourly_files(hours_back: int = 1) -> list[Path]:
     """获取最近 N 小时的日志文件"""
-    now = datetime.now()
+    now = datetime.now(_log_timezone())
     start = now - timedelta(hours=hours_back)
     return get_hourly_files(start, now)
 
@@ -38,6 +49,7 @@ async def grep_files(
     pattern: str,
     max_lines: int = 50,
     extra_args: list[str] | None = None,
+    from_end: bool = False,
 ) -> list[tuple[str, int, str]]:
     """
     在多个文件中 grep 搜索。
@@ -52,6 +64,9 @@ async def grep_files(
         cmd.extend(extra_args)
     cmd.append(pattern)
     cmd.extend(str(f) for f in files)
+
+    if from_end:
+        return await _grep_files_from_end(cmd, files, max_lines)
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -84,6 +99,57 @@ async def grep_files(
             if len(parts) >= 3 and parts[1].isdigit():
                 results.append((parts[0], int(parts[1]), parts[2]))
 
+    return results
+
+
+async def _grep_files_from_end(
+    grep_cmd: list[str],
+    files: list[Path],
+    max_lines: int,
+) -> list[tuple[str, int, str]]:
+    """执行 grep 后只保留最后 N 条，避免 Live Errors 卡在小时文件开头。"""
+    grep_proc = await asyncio.create_subprocess_exec(
+        *grep_cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    tail_lines: deque[str] = deque(maxlen=max_lines)
+
+    async def consume_stdout() -> None:
+        if grep_proc.stdout is None:
+            return
+        while True:
+            line = await grep_proc.stdout.readline()
+            if not line:
+                break
+            tail_lines.append(line.decode("utf-8", errors="replace").rstrip("\n"))
+
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(consume_stdout(), grep_proc.wait()),
+            timeout=settings.limits.command_timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        grep_proc.kill()
+        await grep_proc.wait()
+        raise TimeoutError("grep 超时")
+
+    return _parse_grep_output(list(tail_lines), files)
+
+
+def _parse_grep_output(lines: list[str], files: list[Path]) -> list[tuple[str, int, str]]:
+    results = []
+    for line in lines:
+        # 多文件格式: filename:line_number:content
+        # 单文件格式: line_number:content
+        if len(files) == 1:
+            parts = line.split(":", 1)
+            if len(parts) == 2 and parts[0].isdigit():
+                results.append((str(files[0]), int(parts[0]), parts[1]))
+        else:
+            parts = line.split(":", 2)
+            if len(parts) >= 3 and parts[1].isdigit():
+                results.append((parts[0], int(parts[1]), parts[2]))
     return results
 
 

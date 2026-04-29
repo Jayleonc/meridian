@@ -1,7 +1,7 @@
 server:
   name: probe
-  environment: dev
-  host: "0.0.0.0"
+  environment: dev-server
+  host: "127.0.0.1"
   port: 3002
   audit_log_path: ./audit.log
 

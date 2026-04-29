@@ -4,6 +4,7 @@ import { useApp } from "../context/AppContext";
 import { useInvestigation } from "../context/InvestigationContext";
 import { usePolling } from "../hooks/usePolling";
 import { atlas, lens, probe, type AtlasStatus, type LogItem, type ServiceInfo } from "../api/client";
+import { formatLogTime } from "../utils/time";
 
 const SVC = {
   atlas: { port: 3001, desc: "元数据中心 — Schema 管理与服务注册" },
@@ -134,7 +135,7 @@ export default function Dashboard() {
                     className={`log-line clickable ${i < newErrorCount ? "new-item" : ""}`}
                     onClick={() => handleErrorClick(item)}
                   >
-                    <span className="log-ts">{item.timestamp?.slice(11, 19) || "\u2014"}</span>
+                    <span className="log-ts">{formatLogTime(item.timestamp)}</span>
                     <span className={`log-level ${item.level}`}>{item.level}</span>
                     {item.source && <span className="log-svc">[{item.source}]</span>}
                     <span className="log-msg">{item.text}</span>

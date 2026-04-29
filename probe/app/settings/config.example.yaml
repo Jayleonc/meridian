@@ -12,6 +12,9 @@ limits:
 security:
   redact_enabled: true
 
+time:
+  log_timezone: Asia/Shanghai
+
 services:
   gateway:
     log_paths:

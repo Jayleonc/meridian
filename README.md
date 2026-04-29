@@ -81,10 +81,11 @@ password: jayleonc
 
 ```text
 deploy/dev-server/atlas.config.yaml
+deploy/dev-server/probe.config.yaml
 deploy/dev-server/lens.config.yaml
 ```
 
-`dev-server.sh` 会默认设置 `MERIDIAN_ATLAS_CONFIG` 和 `MERIDIAN_LENS_CONFIG` 指向这两个文件。Atlas 在开发服务器配置中不会每次启动都重新全量采集业务 MySQL，而是优先从 Meridian PostgreSQL 恢复最近一次 schema 快照；需要重新采集时再通过 Console / API / MCP 手动 refresh。
+`dev-server.sh` 会默认设置 `MERIDIAN_ATLAS_CONFIG`、`MERIDIAN_PROBE_CONFIG` 和 `MERIDIAN_LENS_CONFIG` 指向这些文件。Probe 默认按 `Asia/Shanghai` 业务日志时区查找 `/data/brick/log/YYYYMMDDHH.log` 小时文件；如果服务器日志文件名使用其他时区，修改 `deploy/dev-server/probe.config.yaml` 的 `time.log_timezone`。Atlas 在开发服务器配置中不会每次启动都重新全量采集业务 MySQL，而是优先从 Meridian PostgreSQL 恢复最近一次 schema 快照；需要重新采集时再通过 Console / API / MCP 手动 refresh。
 
 如果开发服务器 Node 版本太旧，可以直接使用仓库内预构建的 Console 静态产物：
 

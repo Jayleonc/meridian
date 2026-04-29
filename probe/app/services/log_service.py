@@ -187,7 +187,7 @@ async def search_by_request_id(
     params = {"request_id": request_id, "back_hours": back_hours, "hint_time": hint_time}
     try:
         raw = await glog_adapter.glog_search(request_id, back_hours)
-        lines = [l for l in raw.splitlines() if l.strip()]
+        lines = [line for line in raw.splitlines() if line.strip()]
         total = len(lines)
 
         # 分类：错误 / 警告 / 普通
@@ -226,7 +226,6 @@ async def search_by_request_id(
 
         # 限制 timeline 条数，保留头尾各 15 条，中间省略
         max_timeline = 30
-        timeline_truncated = False
         if len(timeline) > max_timeline:
             half = max_timeline // 2
             omitted = len(timeline) - max_timeline
@@ -236,7 +235,6 @@ async def search_by_request_id(
                 timestamp="", level="INF", service="---",
                 source="", message=f"[省略中间 {omitted} 条 INF/DBG 日志]",
             )] + tail
-            timeline_truncated = True
 
         # 生成智能提示：帮助 Agent 判断是否需要扩大搜索
         hint = _build_search_hint(total, back_hours, services_seen, errors, time_range)
@@ -409,7 +407,7 @@ async def tail_errors(hours_back: int = 1, keyword: str | None = None, limit: in
             )
 
         pattern = f"ERR.*{keyword}" if keyword else "ERR"
-        results = await file_adapter.grep_files(files, pattern, limit, ["-E"])
+        results = await file_adapter.grep_files(files, pattern, limit, ["-E"], from_end=True)
 
         total = len(results)
         truncated = total >= limit
@@ -436,9 +434,9 @@ def get_context(file: str, line_number: int, before: int = 10, after: int = 10) 
     try:
         ctx = file_adapter.read_context(file, line_number, before, after)
         if settings.security.redact_enabled:
-            ctx["before"] = [redact_text(l) for l in ctx["before"]]
+            ctx["before"] = [redact_text(line) for line in ctx["before"]]
             ctx["match"] = redact_text(ctx["match"])
-            ctx["after"] = [redact_text(l) for l in ctx["after"]]
+            ctx["after"] = [redact_text(line) for line in ctx["after"]]
 
         _audit("context_around_match", params, 1, False)
         return {

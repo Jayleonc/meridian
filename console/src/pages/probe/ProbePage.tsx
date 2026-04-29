@@ -4,6 +4,7 @@ import { useApp } from "../../context/AppContext";
 import { useInvestigation } from "../../context/InvestigationContext";
 import { usePolling } from "../../hooks/usePolling";
 import { probe, type LogItem, type SearchResult, type TraceSummary } from "../../api/client";
+import { formatLogTime } from "../../utils/time";
 
 type Tab = "errors" | "search" | "trace";
 
@@ -168,7 +169,7 @@ export default function ProbePage() {
                       onClick={() => onLogClick(item)}
                       title={item.request_id ? `Click to trace ${item.request_id}` : undefined}
                     >
-                      <span className="log-ts">{item.timestamp?.slice(11, 19) || ""}</span>
+                      <span className="log-ts">{formatLogTime(item.timestamp)}</span>
                       <span className={`log-level ${item.level}`}>{item.level}</span>
                       {item.source && <span className="log-svc">[{item.source}]</span>}
                       <span className="log-msg">{item.text}</span>
@@ -230,7 +231,7 @@ export default function ProbePage() {
                         className={`log-line ${item.request_id ? "clickable" : ""}`}
                         onClick={() => onLogClick(item)}
                       >
-                        <span className="log-ts">{item.timestamp?.slice(11, 19) || ""}</span>
+                        <span className="log-ts">{formatLogTime(item.timestamp)}</span>
                         <span className={`log-level ${item.level}`}>{item.level}</span>
                         {item.source && <span className="log-svc">[{item.source}]</span>}
                         <span className="log-msg">{item.text}</span>
@@ -361,7 +362,7 @@ function TraceView({
           <div className="card-body flush" style={{ maxHeight: 280, overflowY: "auto" }}>
             {trace.errors.map((e, i) => (
               <div key={i} className="log-line">
-                <span className="log-ts">{e.timestamp?.slice(11, 19) || ""}</span>
+                <span className="log-ts">{formatLogTime(e.timestamp)}</span>
                 <span className="log-level ERR">ERR</span>
                 <span className="log-svc" style={{ cursor: "pointer" }} onClick={() => onServiceClick(e.service)}>
                   [{e.service}]
@@ -382,7 +383,7 @@ function TraceView({
           <div className="card-body flush" style={{ maxHeight: 200, overflowY: "auto" }}>
             {trace.warns.map((w, i) => (
               <div key={i} className="log-line">
-                <span className="log-ts">{w.timestamp?.slice(11, 19) || ""}</span>
+                <span className="log-ts">{formatLogTime(w.timestamp)}</span>
                 <span className="log-level WAR">WAR</span>
                 <span className="log-svc">[{w.service}]</span>
                 <span className="log-msg">{w.message}</span>
@@ -401,7 +402,7 @@ function TraceView({
           <div className="card-body flush" style={{ maxHeight: 400, overflowY: "auto" }}>
             {trace.timeline.map((t, i) => (
               <div key={i} className="log-line">
-                <span className="log-ts">{t.timestamp?.slice(11, 19) || ""}</span>
+                <span className="log-ts">{formatLogTime(t.timestamp)}</span>
                 <span className={`log-level ${t.level}`}>{t.level}</span>
                 <span className="log-svc" style={{ cursor: "pointer" }} onClick={() => onServiceClick(t.service)}>
                   [{t.service}]
