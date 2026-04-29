@@ -1,5 +1,6 @@
 """Atlas 配置管理 — 复用 Probe 的 YAML 驱动模式"""
 
+import os
 from pathlib import Path
 
 import yaml
@@ -62,6 +63,7 @@ class ServiceDiscoveryConfig(BaseModel):
 class SnapshotConfig(BaseModel):
     """快照与 diff 配置"""
 
+    collect_on_startup: bool = False
     auto_refresh_enabled: bool = False
     refresh_interval_hours: int = 24
 
@@ -90,7 +92,11 @@ def load_settings(config_path: str | None = None) -> Settings:
     if _settings is not None:
         return _settings
 
-    path = Path(config_path or Path(__file__).parent.parent / "settings" / "config.yaml")
+    path = Path(
+        config_path
+        or os.environ.get("MERIDIAN_ATLAS_CONFIG", "")
+        or Path(__file__).parent.parent / "settings" / "config.yaml"
+    )
     if path.exists():
         with open(path) as f:
             data = yaml.safe_load(f) or {}

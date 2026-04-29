@@ -1,0 +1,47 @@
+server:
+  name: lens
+  environment: dev-server
+  host: "127.0.0.1"
+  port: 3003
+  audit_log_path: ./.meridian/audit/lens.log
+
+business_mysql:
+  host: "172.31.0.6"
+  port: 3306
+  user: readonly
+  password: ""
+  database:
+    - highlink
+
+business_datasource:
+  - name: default-mysql
+    type: mysql
+    host: "172.31.0.6"
+    port: 3306
+    user: readonly
+    password: ""
+    database:
+      - highlink
+
+meridian_db:
+  host: "127.0.0.1"
+  port: 15432
+  user: root
+  password: jayleonc
+  database: meridian
+
+query:
+  max_limit: 100
+  default_limit: 20
+  default_time_range_days: 7
+  timeout_seconds: 30
+  require_filter: true
+
+sensitive_fields:
+  - phone
+  - mobile
+  - id_card
+  - identity
+  - password
+  - secret
+  - token

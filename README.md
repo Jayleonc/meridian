@@ -77,6 +77,15 @@ password: jayleonc
 
 业务 MySQL 按只读边界接入：Atlas 只查询 `information_schema` 采集表结构，Lens 的 MySQL adapter 会拒绝非 `SELECT`、多语句、没有 `LIMIT` 或包含写入/管理类关键字的 SQL。开发环境即使暂时拿到读写账号，应用层也不应执行写入；正式或长期开发环境仍建议给 Meridian 单独创建只授予 `SELECT` 的数据库账号。
 
+开发服务器使用独立配置文件，不和模块本地 `settings/config.yaml` 混用：
+
+```text
+deploy/dev-server/atlas.config.yaml
+deploy/dev-server/lens.config.yaml
+```
+
+`dev-server.sh` 会默认设置 `MERIDIAN_ATLAS_CONFIG` 和 `MERIDIAN_LENS_CONFIG` 指向这两个文件。Atlas 在开发服务器配置中不会每次启动都重新全量采集业务 MySQL，而是优先从 Meridian PostgreSQL 恢复最近一次 schema 快照；需要重新采集时再通过 Console / API / MCP 手动 refresh。
+
 如果开发服务器 Node 版本太旧，可以直接使用仓库内预构建的 Console 静态产物：
 
 ```bash

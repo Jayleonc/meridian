@@ -157,6 +157,20 @@ async def collect_all() -> list[SchemaSnapshot]:
     return snapshots
 
 
+async def restore_all_latest_snapshots() -> list[SchemaSnapshot]:
+    """从 PG 恢复所有已配置数据库的最新快照，不触碰业务 MySQL。"""
+    cfg = get_settings()
+    snapshots = []
+
+    for db in cfg.business_mysql.database:
+        await _ensure_cache(db)
+        cached = _snapshots.get(db, [])
+        if cached:
+            snapshots.append(cached[-1])
+
+    return snapshots
+
+
 async def get_latest_snapshot(database: str) -> SchemaSnapshot | None:
     """获取某个数据库的最新快照（先查缓存，缓存空则查 PG）"""
     await _ensure_cache(database)

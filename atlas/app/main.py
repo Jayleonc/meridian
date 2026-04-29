@@ -1,7 +1,7 @@
 """Atlas — HTTP 入口
 
 挂载 HTTP 路由和 MCP 传输层。
-启动时自动采集一次 schema，可选定时刷新。
+启动时可选采集一次 schema，可选定时刷新。
 """
 
 import asyncio
@@ -67,6 +67,20 @@ async def _initial_collect():
         logger.error("启动采集失败", exc_info=True)
 
 
+async def _restore_latest_snapshots():
+    """启动时从 PG 恢复最新 schema 快照，不访问业务 MySQL。"""
+    from app.services.schema_service import restore_all_latest_snapshots
+
+    try:
+        snapshots = await restore_all_latest_snapshots()
+        for s in snapshots:
+            logger.info("启动恢复快照: %s (%d 张表)", s.database, len(s.table))
+        if not snapshots:
+            logger.info("启动恢复快照: 尚无历史快照，可手动 refresh 触发首次采集")
+    except Exception:
+        logger.error("启动恢复快照失败", exc_info=True)
+
+
 async def _periodic_refresh(interval_hours: int):
     """定时刷新 schema，检测变更"""
     from app.services.schema_service import collect_all, diff_schema
@@ -104,11 +118,15 @@ async def lifespan(app: FastAPI):
     # 注册服务发现 Provider
     _setup_discovery_providers()
 
-    # 启动后立即采集一次（后台，不阻塞）
-    asyncio.create_task(_initial_collect())
+    cfg = get_settings()
+    if cfg.snapshot.collect_on_startup:
+        # 启动后立即采集一次（后台，不阻塞）
+        asyncio.create_task(_initial_collect())
+    else:
+        # 默认只恢复 PG 中已有快照，避免每次重启都全量扫描业务 MySQL。
+        asyncio.create_task(_restore_latest_snapshots())
 
     # 如果配置了定时刷新，启动定时任务
-    cfg = get_settings()
     if cfg.snapshot.auto_refresh_enabled:
         _refresh_task = asyncio.create_task(
             _periodic_refresh(cfg.snapshot.refresh_interval_hours)

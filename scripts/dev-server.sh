@@ -51,6 +51,8 @@ export MERIDIAN_REPO_ROOT="${MERIDIAN_REPO_ROOT:-$PWD}"
 export MERIDIAN_SERVICE_LOG_DIR="${MERIDIAN_SERVICE_LOG_DIR:-$PWD/.meridian/logs}"
 export MERIDIAN_RUN_DIR="${MERIDIAN_RUN_DIR:-$PWD/.meridian/run}"
 export MERIDIAN_DEVOPS_ENABLED="${MERIDIAN_DEVOPS_ENABLED:-true}"
+export MERIDIAN_ATLAS_CONFIG="${MERIDIAN_ATLAS_CONFIG:-$PWD/deploy/dev-server/atlas.config.yaml}"
+export MERIDIAN_LENS_CONFIG="${MERIDIAN_LENS_CONFIG:-$PWD/deploy/dev-server/lens.config.yaml}"
 
 mkdir -p "$MERIDIAN_SERVICE_LOG_DIR" "$MERIDIAN_RUN_DIR"
 
@@ -62,5 +64,7 @@ fi
 echo "🌐 外部访问: http://<dev-server>:3000"
 echo "🔒 内部服务: Atlas/Probe/Lens/Trace 仅绑定 ${MERIDIAN_INTERNAL_HOST}"
 echo "🪵 服务日志: ${MERIDIAN_SERVICE_LOG_DIR}"
+echo "🧾 Atlas 配置: ${MERIDIAN_ATLAS_CONFIG}"
+echo "🧾 Lens 配置: ${MERIDIAN_LENS_CONFIG}"
 echo "🧰 DevOps MCP: enabled via Nexus /mcp/stream/"
 exec ./scripts/dev.sh "${args[@]}"

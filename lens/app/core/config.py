@@ -1,5 +1,6 @@
 """Lens 配置管理 — YAML 驱动，复用 Atlas 模式"""
 
+import os
 from pathlib import Path
 
 import yaml
@@ -81,7 +82,11 @@ def load_settings(config_path: str | None = None) -> Settings:
     if _settings is not None:
         return _settings
 
-    path = Path(config_path or Path(__file__).parent.parent / "settings" / "config.yaml")
+    path = Path(
+        config_path
+        or os.environ.get("MERIDIAN_LENS_CONFIG", "")
+        or Path(__file__).parent.parent / "settings" / "config.yaml"
+    )
     if path.exists():
         with open(path) as f:
             data = yaml.safe_load(f) or {}
