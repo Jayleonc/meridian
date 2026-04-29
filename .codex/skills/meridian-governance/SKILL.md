@@ -116,6 +116,7 @@ Meridian 默认边界如下：
 - Python 后端：`python -m py_compile ...`、导入检查、端点 smoke test
 - Probe 日志 adapter：涉及读取、grep、tail、解析或裁剪时，必须覆盖超长单行日志，避免业务日志 req/rsp body 击穿行读取限制。
 - Console：`npm run build`
+- Console 由 Nexus 托管预构建产物时：凡是改动 `console/` 且用户可能通过开发服务器 `--skip-console-build` 使用页面，必须同步更新 `deploy/console-dist.tar.gz`，并至少运行 `./scripts/package-console-dist.sh --skip-build deploy/console-dist.tar.gz` 或 `make package-console-dist`；完成后用 `./scripts/install-console-dist.sh deploy/console-dist.tar.gz` 验证归档可安装。不能只跑 `npm run build` 后结束。
 - Docker / 端口 / 配置：`docker compose config`、定向 `curl`
 - Agent：配置端点、创建会话、必要时做一次小模型工具调用测试
 

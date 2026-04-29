@@ -14,6 +14,7 @@ MAX_TOOL_ROUNDS = int(os.getenv("MERIDIAN_AGENT_MAX_TOOL_ROUNDS", "3"))
 MAX_TOOL_RESULT_CHARS = int(os.getenv("MERIDIAN_AGENT_TOOL_RESULT_CHARS", "9000"))
 AGENT_TURN_TIMEOUT_SECONDS = int(os.getenv("MERIDIAN_AGENT_TURN_TIMEOUT_SECONDS", "60"))
 MODEL_REQUEST_TIMEOUT_SECONDS = int(os.getenv("MERIDIAN_MODEL_REQUEST_TIMEOUT_SECONDS", "45"))
+CHAT_DB_ENABLED = os.getenv("MERIDIAN_CHAT_DB_ENABLED", "true").lower() not in {"0", "false", "no"}
 
 
 def model_provider() -> str:
@@ -35,6 +36,17 @@ def model_base_url() -> str | None:
 
 def model_api_key() -> str | None:
     return os.getenv("MERIDIAN_MODEL_API_KEY") or os.getenv("OPENAI_API_KEY")
+
+
+def chat_db_config() -> dict[str, str | int]:
+    """Nexus Agent Chat 使用 Meridian 平台 PostgreSQL 做会话持久化。"""
+    return {
+        "host": os.getenv("MERIDIAN_DB_HOST", "127.0.0.1"),
+        "port": int(os.getenv("MERIDIAN_DB_PORT", "15432")),
+        "user": os.getenv("MERIDIAN_DB_USER", "root"),
+        "password": os.getenv("MERIDIAN_DB_PASSWORD", "jayleonc"),
+        "database": os.getenv("MERIDIAN_DB_NAME", "meridian"),
+    }
 
 
 def get_chat_config() -> ChatConfig:

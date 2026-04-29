@@ -99,8 +99,20 @@ git pull
 如果需要更新这个预构建包，在有 Node >= 20 的本地机器运行：
 
 ```bash
-./scripts/package-console-dist.sh
-cp .meridian/artifacts/console-dist.tar.gz deploy/console-dist.tar.gz
+make package-console-dist
+```
+
+开发服务器拉取新代码后，如果只想使用仓库内预构建 Console 包启动：
+
+```bash
+make dev-server-prebuilt
+```
+
+等价于：
+
+```bash
+./scripts/install-console-dist.sh deploy/console-dist.tar.gz
+./scripts/dev-server.sh --skip-console-build
 ```
 
 启动后，`dev-server.sh` 会把各服务输出写入：
@@ -186,12 +198,24 @@ MERIDIAN_MODEL_API_KEY=<api-key-or-placeholder>
 ```
 
 启动 Nexus 与 Console 后访问 `/chat`。Agent 当前可通过 Nexus 调用 Probe 的日志搜索、错误巡检、request_id 追踪、服务列表和日志上下文工具。
+Console 会把当前 Agent 会话 ID 保存在浏览器本地，并通过 Meridian PostgreSQL 持久化 `chat_session` / `chat_message`；刷新页面后会恢复最近一次会话。PostgreSQL 不可用时 Nexus 会自动降级为进程内存会话，服务仍可用但刷新或重启后不会恢复历史消息。
 
 Agent 单轮请求默认最多等待 60 秒，单次模型请求默认最多等待 45 秒，避免模型网关或网络问题让 Console 一直停在 Thinking：
 
 ```env
 MERIDIAN_AGENT_TURN_TIMEOUT_SECONDS=60
 MERIDIAN_MODEL_REQUEST_TIMEOUT_SECONDS=45
+```
+
+Agent Chat 使用 Meridian 平台 PostgreSQL，默认连接开发环境 `127.0.0.1:15432/meridian`：
+
+```env
+MERIDIAN_CHAT_DB_ENABLED=true
+MERIDIAN_DB_HOST=127.0.0.1
+MERIDIAN_DB_PORT=15432
+MERIDIAN_DB_USER=root
+MERIDIAN_DB_PASSWORD=jayleonc
+MERIDIAN_DB_NAME=meridian
 ```
 
 Nexus 内部 Agent 结构：

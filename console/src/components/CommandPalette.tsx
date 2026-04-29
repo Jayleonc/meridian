@@ -31,15 +31,15 @@ export default function CommandPalette() {
   const items = useMemo<CmdItem[]>(
     () => [
       { id: "dash", icon: "\u25A3", label: "Dashboard", hint: "/", action: () => navigate("/") },
-      { id: "atlas", icon: "\u2B22", label: "Atlas — Metadata", hint: "/atlas", action: () => navigate("/atlas") },
-      { id: "probe", icon: "\u25CE", label: "Probe — Logs", hint: "/probe", action: () => navigate("/probe") },
-      { id: "lens", icon: "\u25C8", label: "Lens — Data Query", hint: "/lens", action: () => navigate("/lens") },
-      { id: "search", icon: "\u2315", label: "Search Logs...", hint: "Probe", action: () => navigate("/probe?tab=search") },
-      { id: "errors", icon: "\u26A0", label: "Recent Errors", hint: "Probe", action: () => navigate("/probe?tab=errors") },
-      { id: "trace", icon: "\u21C4", label: "Trace Request", hint: "Probe", action: () => navigate("/probe?tab=trace") },
-      { id: "entities", icon: "\u2637", label: "Business Entities", hint: "Lens", action: () => navigate("/lens") },
-      { id: "services", icon: "\u229A", label: "Service Discovery", hint: "Atlas", action: () => navigate("/atlas?tab=services") },
-      { id: "schemas", icon: "\u2592", label: "Schema Browser", hint: "Atlas", action: () => navigate("/atlas?tab=schemas") },
+      { id: "atlas", icon: "\u2B22", label: "Atlas — 元数据", hint: "/atlas", action: () => navigate("/atlas") },
+      { id: "probe", icon: "\u25CE", label: "Probe — 日志", hint: "/probe", action: () => navigate("/probe") },
+      { id: "lens", icon: "\u25C8", label: "Lens — 数据查询", hint: "/lens", action: () => navigate("/lens") },
+      { id: "search", icon: "\u2315", label: "搜索日志", hint: "Probe", action: () => navigate("/probe?tab=search") },
+      { id: "errors", icon: "\u26A0", label: "最近错误", hint: "Probe", action: () => navigate("/probe?tab=errors") },
+      { id: "trace", icon: "\u21C4", label: "追踪请求", hint: "Probe", action: () => navigate("/probe?tab=trace") },
+      { id: "entities", icon: "\u2637", label: "业务实体", hint: "Lens", action: () => navigate("/lens") },
+      { id: "services", icon: "\u229A", label: "服务发现", hint: "Atlas", action: () => navigate("/atlas?tab=services") },
+      { id: "schemas", icon: "\u2592", label: "Schema 浏览", hint: "Atlas", action: () => navigate("/atlas?tab=schemas") },
     ],
     [navigate]
   );
@@ -75,7 +75,7 @@ export default function CommandPalette() {
           <input
             ref={inputRef}
             className="cmd-input"
-            placeholder="Search commands, pages, entities..."
+            placeholder="搜索命令、页面或实体..."
             value={query}
             onChange={(e) => { setQuery(e.target.value); setSelected(0); }}
             onKeyDown={handleKeyDown}
@@ -96,14 +96,14 @@ export default function CommandPalette() {
           ))}
           {filtered.length === 0 && (
             <div style={{ padding: "16px", textAlign: "center", color: "var(--t4)", fontSize: 13 }}>
-              No results
+              没有结果
             </div>
           )}
         </div>
         <div className="cmd-footer">
-          <span><kbd>{"\u2191\u2193"}</kbd> navigate</span>
-          <span><kbd>{"\u23CE"}</kbd> select</span>
-          <span><kbd>esc</kbd> close</span>
+          <span><kbd>{"\u2191\u2193"}</kbd> 移动</span>
+          <span><kbd>{"\u23CE"}</kbd> 选择</span>
+          <span><kbd>esc</kbd> 关闭</span>
         </div>
       </div>
     </div>

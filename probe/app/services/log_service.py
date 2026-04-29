@@ -44,11 +44,13 @@ def _raw_lines_to_items(
     lines: list[str],
     file: str = "",
     line_numbers: list[int] | None = None,
+    *,
+    include_full: bool = False,
 ) -> list[LogItem]:
     """将原始日志行批量转为 LogItem"""
     items = []
     for i, line in enumerate(lines):
-        parsed = parse_log_line(line)
+        parsed = parse_log_line(line, max_message_length=None if include_full else 0)
         ln = line_numbers[i] if line_numbers and i < len(line_numbers) else 0
         if parsed:
             items.append(LogItem(
@@ -64,18 +66,22 @@ def _raw_lines_to_items(
             items.append(LogItem(
                 timestamp="",
                 level="",
-                text=_maybe_redact(_truncate(line.strip())),
+                text=_maybe_redact(line.strip() if include_full else _truncate(line.strip())),
                 file=file,
                 line_number=ln,
             ))
     return items
 
 
-def _grep_results_to_items(results: list[tuple[str, int, str]]) -> list[LogItem]:
+def _grep_results_to_items(
+    results: list[tuple[str, int, str]],
+    *,
+    include_full: bool = False,
+) -> list[LogItem]:
     """将 grep 结果转为 LogItem 列表"""
     items = []
     for filename, line_num, text in results:
-        parsed = parse_log_line(text)
+        parsed = parse_log_line(text, max_message_length=None if include_full else 0)
         if parsed:
             items.append(LogItem(
                 timestamp=parsed["timestamp"],
@@ -90,7 +96,7 @@ def _grep_results_to_items(results: list[tuple[str, int, str]]) -> list[LogItem]
             items.append(LogItem(
                 timestamp="",
                 level="",
-                text=_maybe_redact(_truncate(text.strip())),
+                text=_maybe_redact(text.strip() if include_full else _truncate(text.strip())),
                 file=filename,
                 line_number=line_num,
             ))
@@ -338,6 +344,7 @@ async def search_logs(
     end_time: str | None = None,
     level: str | None = None,
     limit: int = 20,
+    include_full: bool = False,
 ) -> SearchResult:
     """按关键词搜索日志，支持时间范围和级别过滤"""
     limit = min(limit, settings.limits.max_lines)
@@ -364,6 +371,7 @@ async def search_logs(
         "end_time": end_dt.isoformat(),
         "level": level,
         "limit": limit,
+        "include_full": include_full,
     }
 
     try:
@@ -378,13 +386,24 @@ async def search_logs(
 
         if level:
             pattern = f"{level.upper()}.*{keyword}|{keyword}.*{level.upper()}"
-            results = await file_adapter.grep_files(files, pattern, limit, ["-E"])
+            results = await file_adapter.grep_files(
+                files,
+                pattern,
+                limit,
+                ["-E"],
+                include_full_lines=include_full,
+            )
         else:
-            results = await file_adapter.grep_files(files, keyword, limit)
+            results = await file_adapter.grep_files(
+                files,
+                keyword,
+                limit,
+                include_full_lines=include_full,
+            )
 
         total = len(results)
         truncated = total >= limit
-        items = _grep_results_to_items(results)
+        items = _grep_results_to_items(results, include_full=include_full)
 
         _audit("search_logs", params, total, truncated)
         return SearchResult(
@@ -398,10 +417,15 @@ async def search_logs(
         raise
 
 
-async def tail_errors(hours_back: int = 1, keyword: str | None = None, limit: int = 30) -> SearchResult:
+async def tail_errors(
+    hours_back: int = 1,
+    keyword: str | None = None,
+    limit: int = 30,
+    include_full: bool = False,
+) -> SearchResult:
     """查看最近的错误日志"""
     limit = min(limit, settings.limits.max_lines)
-    params = {"hours_back": hours_back, "keyword": keyword, "limit": limit}
+    params = {"hours_back": hours_back, "keyword": keyword, "limit": limit, "include_full": include_full}
 
     try:
         files = file_adapter.get_recent_hourly_files(hours_back)
@@ -414,11 +438,18 @@ async def tail_errors(hours_back: int = 1, keyword: str | None = None, limit: in
             )
 
         pattern = f"ERR.*{keyword}" if keyword else "ERR"
-        results = await file_adapter.grep_files(files, pattern, limit, ["-E"], from_end=True)
+        results = await file_adapter.grep_files(
+            files,
+            pattern,
+            limit,
+            ["-E"],
+            from_end=True,
+            include_full_lines=include_full,
+        )
 
         total = len(results)
         truncated = total >= limit
-        items = _grep_results_to_items(results)
+        items = _grep_results_to_items(results, include_full=include_full)
 
         _audit("tail_errors", params, total, truncated)
         return SearchResult(

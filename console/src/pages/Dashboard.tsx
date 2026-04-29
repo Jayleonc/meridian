@@ -55,7 +55,7 @@ export default function Dashboard() {
   return (
     <>
       <div className="page-header">
-        <h2>Dashboard</h2>
+        <h2>概览</h2>
         <div className="page-desc">Meridian 运维观测平台 — 系统概览</div>
       </div>
 
@@ -76,7 +76,7 @@ export default function Dashboard() {
               <div className="svc-status">
                 <span className={`status-dot ${health[name]}`} />
                 <span style={{ color: health[name] === "online" ? "var(--emerald)" : health[name] === "offline" ? "var(--coral)" : "var(--warn)" }}>
-                  {health[name] === "online" ? "ONLINE" : health[name] === "checking" ? "CHECKING..." : "OFFLINE"}
+                  {health[name] === "online" ? "在线" : health[name] === "checking" ? "检查中" : "离线"}
                 </span>
               </div>
             </div>
@@ -90,25 +90,25 @@ export default function Dashboard() {
               <div className={`stat-val ${onlineCount === 3 ? "emerald" : onlineCount > 0 ? "amber" : "coral"}`}>
                 {onlineCount}/3
               </div>
-              <div className="stat-label">Services Online</div>
+              <div className="stat-label">在线服务</div>
             </div>
           </div>
           <div className="card fade-up stagger-3">
             <div className="stat">
               <div className="stat-val teal">{atlasStatus?.total_databases ?? "\u2014"}</div>
-              <div className="stat-label">Databases Tracked</div>
+              <div className="stat-label">已跟踪数据库</div>
             </div>
           </div>
           <div className="card fade-up stagger-4">
             <div className="stat">
               <div className="stat-val amber">{services.length || "\u2014"}</div>
-              <div className="stat-label">Discovered Services</div>
+              <div className="stat-label">已发现服务</div>
             </div>
           </div>
           <div className="card fade-up stagger-5">
             <div className="stat">
               <div className="stat-val violet">{entityCount ?? "\u2014"}</div>
-              <div className="stat-label">Business Entities</div>
+              <div className="stat-label">业务实体</div>
             </div>
           </div>
         </div>
@@ -118,13 +118,13 @@ export default function Dashboard() {
           <div className="card fade-up stagger-4">
             <div className="card-head">
               <h3>
-                Live Errors
+                实时错误
                 {newErrorCount > 0 && (
-                  <span className="badge badge-coral" style={{ marginLeft: 8 }}>+{newErrorCount} new</span>
+                  <span className="badge badge-coral" style={{ marginLeft: 8 }}>新增 {newErrorCount}</span>
                 )}
               </h3>
               <button className="btn btn-ghost btn-sm" onClick={() => navigate("/probe?tab=errors")}>
-                View all
+                查看全部
               </button>
             </div>
             <div className="card-body flush" style={{ maxHeight: 320, overflowY: "auto" }}>
@@ -144,7 +144,7 @@ export default function Dashboard() {
               ) : (
                 <div className="empty">
                   <div className="empty-icon">{"\u2713"}</div>
-                  <div className="empty-text">No recent errors</div>
+                  <div className="empty-text">最近没有错误</div>
                 </div>
               )}
             </div>
@@ -153,7 +153,7 @@ export default function Dashboard() {
           {/* Connections & schemas */}
           <div className="card fade-up stagger-5">
             <div className="card-head">
-              <h3>Database Connections</h3>
+              <h3>数据库连接</h3>
               <button className="btn btn-ghost btn-sm" onClick={() => navigate("/atlas")}>
                 Atlas
               </button>
@@ -172,7 +172,7 @@ export default function Dashboard() {
                   {Object.keys(atlasStatus.databases).length > 0 && (
                     <div className="mt-md">
                       <div style={{ fontSize: 10, color: "var(--t4)", fontFamily: "var(--font-display)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>
-                        Schemas
+                        Schema
                       </div>
                       {Object.entries(atlasStatus.databases).map(([db, info]) => (
                         <div
@@ -191,7 +191,7 @@ export default function Dashboard() {
                           <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--teal)" }}>
                             {db}
                           </span>
-                          <span className="badge badge-dim">{info.table_count} tables</span>
+                          <span className="badge badge-dim">{info.table_count} 张表</span>
                         </div>
                       ))}
                     </div>
@@ -199,7 +199,7 @@ export default function Dashboard() {
                 </>
               ) : (
                 <div className="empty">
-                  <div className="empty-text">Atlas offline</div>
+                  <div className="empty-text">Atlas 离线</div>
                 </div>
               )}
             </div>
@@ -210,18 +210,18 @@ export default function Dashboard() {
         {services.length > 0 && (
           <div className="card mt-lg fade-up stagger-6">
             <div className="card-head">
-              <h3>Discovered Services</h3>
+              <h3>已发现服务</h3>
               <span className="badge badge-teal">{services.length}</span>
             </div>
             <div className="card-body flush" style={{ overflowX: "auto" }}>
               <table className="dtable">
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Status</th>
+                    <th>名称</th>
+                    <th>状态</th>
                     <th>PID</th>
-                    <th>Path</th>
-                    <th>Databases</th>
+                    <th>路径</th>
+                    <th>数据库</th>
                   </tr>
                 </thead>
                 <tbody>

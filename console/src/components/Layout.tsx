@@ -4,9 +4,9 @@ import { useInvestigation, getStepIcon } from "../context/InvestigationContext";
 import CommandPalette from "./CommandPalette";
 
 const NAV = [
-  { to: "/", icon: "\u25A3", label: "Dashboard" },
+  { to: "/", icon: "\u25A3", label: "概览" },
   { to: "/chat", icon: "\u25CC", label: "Agent" },
-  { group: "Observe" },
+  { group: "观测" },
   { to: "/atlas", icon: "\u2B22", label: "Atlas", svc: "atlas" as const },
   { to: "/probe", icon: "\u25CE", label: "Probe", svc: "probe" as const },
   { to: "/lens", icon: "\u25C8", label: "Lens", svc: "lens" as const },
@@ -48,7 +48,7 @@ export default function Layout() {
           </nav>
 
           <div className="sidebar-bottom">
-            <div className="sidebar-kbd">{"\u2318"}K Command Palette</div>
+            <div className="sidebar-kbd">{"\u2318"}K 命令面板</div>
           </div>
         </aside>
 
@@ -69,7 +69,7 @@ export default function Layout() {
                 </span>
               </span>
             ))}
-            <span className="inv-clear" onClick={inv.clear}>{"\u2715"} Clear</span>
+            <span className="inv-clear" onClick={inv.clear}>{"\u2715"} 清除</span>
           </div>
         )}
       </div>

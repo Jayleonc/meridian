@@ -83,10 +83,11 @@ def _clean_ansi(text: str) -> str:
     return ANSI_ESCAPE.sub("", text)
 
 
-def parse_log_line(line: str) -> dict | None:
+def parse_log_line(line: str, max_message_length: int | None = 0) -> dict | None:
     """
     解析单行日志，返回结构化字典；无法解析则返回 None。
-    解析后的 message 会自动截断。
+
+    max_message_length 为 None 时保留完整 message；否则按配置或传入长度截断。
     """
     cleaned = _clean_ansi(line.strip())
     m = LOG_PATTERN.match(cleaned)
@@ -100,5 +101,5 @@ def parse_log_line(line: str) -> dict | None:
         "request_id": m.group(5),
         "level": m.group(6),
         "source": m.group(7),
-        "message": _truncate(m.group(8)),
+        "message": m.group(8) if max_message_length is None else _truncate(m.group(8), max_message_length),
     }

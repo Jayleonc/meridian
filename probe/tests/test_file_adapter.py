@@ -28,6 +28,15 @@ async def test_grep_files_from_end_returns_latest_matches(tmp_path, monkeypatch)
     assert [line_number for _, line_number, _ in results] == [3, 4, 5]
     assert results[-1][2].endswith("字符]")
 
+    full_results = await file_adapter.grep_files(
+        [log_file],
+        "ERR",
+        max_lines=1,
+        from_end=True,
+        include_full_lines=True,
+    )
+    assert len(full_results[-1][2]) > 70000
+
 
 def test_recent_hourly_files_use_configured_log_timezone(tmp_path, monkeypatch):
     (tmp_path / "2026042911.log").touch()

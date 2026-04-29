@@ -50,6 +50,7 @@ async def grep_files(
     max_lines: int = 50,
     extra_args: list[str] | None = None,
     from_end: bool = False,
+    include_full_lines: bool = False,
 ) -> list[tuple[str, int, str]]:
     """
     在多个文件中 grep 搜索。
@@ -59,14 +60,20 @@ async def grep_files(
     if not files:
         return []
 
-    cmd = ["grep", "-n"]
+    cmd = ["grep", "-Hn"]
     if extra_args:
         cmd.extend(extra_args)
     cmd.append(pattern)
     cmd.extend(str(f) for f in files)
 
     if from_end:
-        return await _grep_files_from_end(files, pattern, max_lines, extra_args or [])
+        return await _grep_files_from_end(
+            files,
+            pattern,
+            max_lines,
+            extra_args or [],
+            include_full_lines=include_full_lines,
+        )
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -88,16 +95,9 @@ async def grep_files(
     for line in stdout.decode("utf-8", errors="replace").splitlines():
         if len(results) >= max_lines:
             break
-        # 多文件格式: filename:line_number:content
-        # 单文件格式: line_number:content
-        if len(files) == 1:
-            parts = line.split(":", 1)
-            if len(parts) == 2 and parts[0].isdigit():
-                results.append((str(files[0]), int(parts[0]), parts[1]))
-        else:
-            parts = line.split(":", 2)
-            if len(parts) >= 3 and parts[1].isdigit():
-                results.append((parts[0], int(parts[1]), parts[2]))
+        parsed = _parse_grep_line(line, trim_line=not include_full_lines)
+        if parsed:
+            results.append(parsed)
 
     return results
 
@@ -107,15 +107,66 @@ async def _grep_files_from_end(
     pattern: str,
     max_lines: int,
     extra_args: list[str],
+    *,
+    include_full_lines: bool = False,
 ) -> list[tuple[str, int, str]]:
-    """扫描文件并保留最后 N 条匹配，避免超长日志行击穿 asyncio.readline 限制。"""
+    """用 grep 流式扫描并保留最后 N 条匹配。
+
+    之前这里用 Python 逐行扫大日志文件，容易在开发服务器上超时并导致 500。
+    grep 负责高性能匹配，Python 只保留最后 max_lines 条结果。
+    """
+    cmd = ["grep", "-Hn"]
+    cmd.extend(extra_args)
+    cmd.append(pattern)
+    cmd.extend(str(f) for f in files)
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    async def collect() -> list[tuple[str, int, str]]:
+        assert proc.stdout is not None
+        results: deque[tuple[str, int, str]] = deque(maxlen=max_lines)
+        buffer = ""
+        while True:
+            chunk = await proc.stdout.read(65536)
+            if not chunk:
+                break
+            buffer += chunk.decode("utf-8", errors="replace")
+            while True:
+                newline = buffer.find("\n")
+                if newline < 0:
+                    break
+                line = buffer[:newline].rstrip("\r")
+                buffer = buffer[newline + 1:]
+                parsed = _parse_grep_line(line, trim_line=not include_full_lines)
+                if parsed:
+                    results.append(parsed)
+
+        if buffer:
+            parsed = _parse_grep_line(buffer.rstrip("\r"), trim_line=not include_full_lines)
+            if parsed:
+                results.append(parsed)
+
+        await proc.wait()
+        return list(results)
+
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_scan_files_from_end, files, pattern, max_lines, extra_args),
-            timeout=settings.limits.command_timeout_seconds,
-        )
+        return await asyncio.wait_for(collect(), timeout=settings.limits.command_timeout_seconds)
     except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
         raise TimeoutError("grep 超时")
+
+
+def _parse_grep_line(line: str, *, trim_line: bool = True) -> tuple[str, int, str] | None:
+    parts = line.split(":", 2)
+    if len(parts) >= 3 and parts[1].isdigit():
+        text = parts[2]
+        return (parts[0], int(parts[1]), _trim_result_line(text) if trim_line else text)
+    return None
 
 
 def _scan_files_from_end(

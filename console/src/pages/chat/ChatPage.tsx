@@ -7,6 +7,7 @@ const EXAMPLES = [
   "列出当前可观测服务",
   "搜索 timeout 相关日志",
 ];
+const CHAT_SESSION_KEY = "meridian.chat.session_id";
 
 function formatToolName(name: string): string {
   if (name.startsWith("probe_")) return name.replace(/^probe_/, "probe.");
@@ -50,15 +51,25 @@ export default function ChatPage() {
     async function boot() {
       setLoading(true);
       try {
-        const [cfg, created] = await Promise.all([
-          chat.config(),
-          chat.createSession("Console Agent"),
-        ]);
+        const cfg = await chat.config();
+        const savedSessionId = window.localStorage.getItem(CHAT_SESSION_KEY);
+        let activeSession: ChatSession | null = null;
+        if (savedSessionId) {
+          try {
+            activeSession = await chat.getSession(savedSessionId);
+          } catch {
+            window.localStorage.removeItem(CHAT_SESSION_KEY);
+          }
+        }
+        if (!activeSession) {
+          activeSession = await chat.createSession("Console Agent");
+          window.localStorage.setItem(CHAT_SESSION_KEY, activeSession.id);
+        }
         if (!alive) return;
         setConfig(cfg);
-        setSession(created);
+        setSession(activeSession);
       } catch (e) {
-        toast("error", e instanceof Error ? e.message : "Agent init failed");
+        toast("error", e instanceof Error ? e.message : "Agent 初始化失败");
       } finally {
         if (alive) setLoading(false);
       }
@@ -95,11 +106,26 @@ export default function ChatPage() {
 
     try {
       const result = await chat.sendMessage(session.id, content);
+      window.localStorage.setItem(CHAT_SESSION_KEY, result.session_id);
       setSession(result.session);
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Message failed");
+      toast("error", e instanceof Error ? e.message : "消息发送失败");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function createNewSession() {
+    if (sending) return;
+    setLoading(true);
+    try {
+      const created = await chat.createSession("Console Agent");
+      window.localStorage.setItem(CHAT_SESSION_KEY, created.id);
+      setSession(created);
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "新建会话失败");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -112,8 +138,11 @@ export default function ChatPage() {
             <div className="page-desc">Nexus 编排 — 当前接入 Probe 诊断工具</div>
           </div>
           <div className="row gap-sm wrap">
+            <button className="btn btn-ghost btn-sm" type="button" onClick={() => void createNewSession()} disabled={loading || sending}>
+              新会话
+            </button>
             <span className={`badge ${config?.configured ? "badge-emerald" : "badge-warn"}`}>
-              {config?.configured ? "MODEL READY" : "MODEL KEY MISSING"}
+              {config?.configured ? "模型已配置" : "缺少模型 Key"}
             </span>
             <span className="badge badge-dim">{modelLabel}</span>
           </div>
@@ -124,7 +153,7 @@ export default function ChatPage() {
         <div className="chat-thread" ref={threadRef}>
           {loading && (
             <div className="empty">
-              <div className="empty-text">Loading agent session</div>
+              <div className="empty-text">正在加载 Agent 会话</div>
             </div>
           )}
 
@@ -153,7 +182,7 @@ export default function ChatPage() {
               <div className="chat-message">
                 <div className="chat-meta">
                   <span>Agent</span>
-                  <span className="badge badge-amber"><span className="spinner" /> Thinking</span>
+                  <span className="badge badge-amber"><span className="spinner" /> 思考中</span>
                 </div>
               </div>
             </div>
@@ -169,8 +198,8 @@ export default function ChatPage() {
         >
           <textarea
             className="input chat-input"
-            aria-label="Agent message"
-            placeholder="Ask Meridian..."
+            aria-label="Agent 消息"
+            placeholder="问 Meridian，例如：最近 1 小时有哪些错误？"
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
@@ -186,7 +215,7 @@ export default function ChatPage() {
             type="submit"
             disabled={loading || sending || !input.trim() || !session}
           >
-            {sending ? <><span className="spinner" /> Sending</> : "Send"}
+            {sending ? <><span className="spinner" /> 发送中</> : "发送"}
           </button>
         </form>
       </div>
@@ -195,7 +224,7 @@ export default function ChatPage() {
 }
 
 function MessageBubble({ message }: { message: ChatMessage }) {
-  const speaker = message.role === "user" ? "You" : "Agent";
+  const speaker = message.role === "user" ? "你" : "Agent";
   return (
     <div className={`chat-row ${message.role}`}>
       <div className="chat-message">
@@ -225,11 +254,11 @@ function ToolCall({ tool }: { tool: ChatToolCall }) {
       </summary>
       <div className="chat-tool-grid">
         <div>
-          <div className="chat-tool-label">Arguments</div>
+          <div className="chat-tool-label">参数</div>
           <pre>{formatValue(tool.arguments)}</pre>
         </div>
         <div>
-          <div className="chat-tool-label">Result</div>
+          <div className="chat-tool-label">结果</div>
           <pre>{formatValue(tool.result)}</pre>
         </div>
       </div>

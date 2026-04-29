@@ -22,6 +22,7 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.responses import FileResponse, Response
 
 from src.agent import create_chat_router
+from src.agent.sessions import HybridSessionStore
 from src import devops
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -46,6 +47,7 @@ PROBE_URL = _base_url("PROBE_URL", "http://127.0.0.1:3002")
 ATLAS_URL = _base_url("ATLAS_URL", "http://127.0.0.1:3001")
 LENS_URL = _base_url("LENS_URL", "http://127.0.0.1:3003")
 TRACE_URL = _base_url("TRACE_URL", "http://127.0.0.1:3004")
+chat_session_store = HybridSessionStore()
 
 _registry: dict[str, dict[str, Any]] = {
     "atlas": {
@@ -123,8 +125,12 @@ class StreamableHTTPApp:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    async with session_manager.run():
-        yield
+    await chat_session_store.init()
+    try:
+        async with session_manager.run():
+            yield
+    finally:
+        await chat_session_store.close()
 
 
 def _json(data: Any) -> str:
@@ -562,7 +568,11 @@ def create_app() -> FastAPI:
             return _devops_disabled()
         return await _devops_smoke_result()
 
-    app.include_router(create_chat_router(_call_chat_tool), prefix="/api/chat", tags=["Chat"])
+    app.include_router(
+        create_chat_router(_call_chat_tool, chat_session_store),
+        prefix="/api/chat",
+        tags=["Chat"],
+    )
 
     @app.api_route(
         "/api/{service}",

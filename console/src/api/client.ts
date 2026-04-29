@@ -158,7 +158,7 @@ export const atlas = {
 export interface LogItem {
   timestamp: string;
   level: string;
-  request_id: string;
+  request_id?: string | null;
   source: string;
   text: string;
   file: string;
@@ -176,6 +176,16 @@ export interface SearchResult {
   };
   items: LogItem[];
   next_actions?: string[];
+}
+
+export interface LogContext {
+  file: string;
+  line_number: number;
+  context: {
+    before: string[];
+    match: string;
+    after: string[];
+  };
 }
 
 export interface TraceEntry {
@@ -206,14 +216,17 @@ export const probe = {
   health: () => request<{ status: string }>("/svc/probe/health"),
   listServices: () =>
     request<{ services: string[]; source: string }>("/api/probe/logs/services"),
-  tailErrors: (hoursBack = 1, limit = 50) =>
-    request<SearchResult>(`/api/probe/logs/errors?hours_back=${hoursBack}&limit=${limit}`),
+  tailErrors: (hoursBack = 1, limit = 50, includeFull = false) =>
+    request<SearchResult>(
+      `/api/probe/logs/errors?hours_back=${hoursBack}&limit=${limit}&include_full=${includeFull ? "true" : "false"}`
+    ),
   search: (body: {
     keyword: string;
     start_time?: string;
     end_time?: string;
     level?: string;
     limit?: number;
+    include_full?: boolean;
   }) =>
     request<SearchResult>("/api/probe/logs/search", {
       method: "POST",
@@ -224,6 +237,10 @@ export const probe = {
     if (hintTime) url += `&hint_time=${encodeURIComponent(hintTime)}`;
     return request<TraceSummary>(url);
   },
+  context: (file: string, lineNumber: number, before = 20, after = 20) =>
+    request<LogContext>(
+      `/api/probe/logs/context?file=${encodeURIComponent(file)}&line_number=${lineNumber}&before=${before}&after=${after}`
+    ),
 };
 
 // ── Lens ──
@@ -378,7 +395,7 @@ export interface ChatTurnResponse {
 
 export const chat = {
   config: () => request<ChatConfig>("/api/chat/config"),
-  createSession: (title = "Investigation") =>
+  createSession: (title = "排障会话") =>
     request<ChatSession>("/api/chat/sessions", {
       method: "POST",
       body: JSON.stringify({ title }),

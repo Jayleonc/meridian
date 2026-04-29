@@ -3,7 +3,7 @@
 供 Console 前端通过 HTTP 调用 Probe 日志查询能力。
 """
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from app.services.log_service import (
     get_context,
@@ -27,22 +27,35 @@ async def errors(
     hours_back: int = Query(1, ge=1, le=24),
     keyword: str | None = Query(None),
     limit: int = Query(30, ge=1, le=500),
+    include_full: bool = Query(False),
 ):
     """查看最近的错误日志"""
-    result = await tail_errors(hours_back=hours_back, keyword=keyword, limit=limit)
+    try:
+        result = await tail_errors(
+            hours_back=hours_back,
+            keyword=keyword,
+            limit=limit,
+            include_full=include_full,
+        )
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="日志搜索超时，请缩小时间范围或关键词后重试") from exc
     return result.model_dump()
 
 
 @router.post("/search")
 async def search(body: dict):
     """按关键词搜索日志"""
-    result = await search_logs(
-        keyword=body["keyword"],
-        start_time=body.get("start_time"),
-        end_time=body.get("end_time"),
-        level=body.get("level"),
-        limit=body.get("limit", 20),
-    )
+    try:
+        result = await search_logs(
+            keyword=body["keyword"],
+            start_time=body.get("start_time"),
+            end_time=body.get("end_time"),
+            level=body.get("level"),
+            limit=body.get("limit", 20),
+            include_full=bool(body.get("include_full", False)),
+        )
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="日志搜索超时，请缩小时间范围或关键词后重试") from exc
     return result.model_dump()
 
 

@@ -16,6 +16,7 @@ type Tab = "schemas" | "services" | "annotations";
 export default function AtlasPage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get("tab") as Tab) || "schemas";
+  const targetService = params.get("svc") || "";
   const { toast } = useApp();
   const inv = useInvestigation();
 
@@ -53,6 +54,11 @@ export default function AtlasPage() {
     loadDatabases();
     atlas.listServices().then((r) => setServices(r.service)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const db = params.get("db") || "";
+    if (db && db !== selectedDb) setSelectedDb(db);
+  }, [params, selectedDb]);
 
   // When db is selected, load its tables
   useEffect(() => {
@@ -193,23 +199,23 @@ export default function AtlasPage() {
           </div>
           <div className="row gap-sm">
             <button className="btn btn-ghost btn-sm" onClick={handleCollect} disabled={collecting}>
-              {collecting ? <><span className="spinner" /> Collecting</> : "Collect Schema"}
+              {collecting ? <><span className="spinner" /> 采集中</> : "采集 Schema"}
             </button>
           </div>
         </div>
         <div className="page-toolbar">
           <div className="tab-bar">
             <button className={`tab-btn ${tab === "schemas" ? "active" : ""}`} onClick={() => setTab("schemas")}>
-              Schema Browser
+              Schema 浏览
             </button>
             <button className={`tab-btn ${tab === "annotations" ? "active" : ""}`} onClick={() => setTab("annotations")}>
-              Annotations
+              语义标注
               {annotations.filter((a) => !a.confirmed).length > 0 && (
                 <span className="tab-count">{annotations.filter((a) => !a.confirmed).length}</span>
               )}
             </button>
             <button className={`tab-btn ${tab === "services" ? "active" : ""}`} onClick={() => setTab("services")}>
-              Services ({services.length})
+              服务发现 ({services.length})
             </button>
           </div>
         </div>
@@ -225,7 +231,7 @@ export default function AtlasPage() {
               {/* Database selector */}
               <div className="card fade-up">
                 <div className="card-head">
-                  <h3>Databases</h3>
+                  <h3>数据库</h3>
                   <span className="badge badge-teal">{databases.length}</span>
                 </div>
                 <div className="card-body flush">
@@ -245,13 +251,13 @@ export default function AtlasPage() {
                     >
                       <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 500 }}>{db.database}</div>
                       <div className="row gap-xs mt-xs">
-                        <span className="badge badge-dim">{db.table_count} tables</span>
-                        <span className="badge badge-dim">{db.snapshot_count} snaps</span>
+                        <span className="badge badge-dim">{db.table_count} 张表</span>
+                        <span className="badge badge-dim">{db.snapshot_count} 快照</span>
                       </div>
                     </div>
                   )) : (
                     <div className="empty" style={{ padding: 20 }}>
-                      <div className="empty-text">No databases. Click "Collect Schema" above.</div>
+                      <div className="empty-text">还没有数据库快照，请先点击上方“采集 Schema”。</div>
                     </div>
                   )}
                 </div>
@@ -261,7 +267,7 @@ export default function AtlasPage() {
               {selectedDb && (
                 <div className="card fade-up stagger-1" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
                   <div className="card-head">
-                    <h3>Tables in {selectedDb}</h3>
+                    <h3>{selectedDb} 的表</h3>
                     <span className="badge badge-teal">{tables.length}</span>
                   </div>
                   <div className="card-body flush" style={{ flex: 1, overflowY: "auto" }}>
@@ -281,9 +287,9 @@ export default function AtlasPage() {
                       >
                         <div style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{t.name}</div>
                         <div className="row gap-xs mt-xs">
-                          <span style={{ fontSize: 11, color: "var(--t4)" }}>{t.column_count} cols</span>
+                          <span style={{ fontSize: 11, color: "var(--t4)" }}>{t.column_count} 列</span>
                           {t.row_count_approx > 0 && (
-                            <span style={{ fontSize: 11, color: "var(--t4)" }}>~{t.row_count_approx.toLocaleString()} rows</span>
+                            <span style={{ fontSize: 11, color: "var(--t4)" }}>约 {t.row_count_approx.toLocaleString()} 行</span>
                           )}
                         </div>
                         {t.comment && (
@@ -303,13 +309,13 @@ export default function AtlasPage() {
                 <input
                   className="input"
                   style={{ flex: 1 }}
-                  placeholder="Search tables, columns, comments..."
+                  placeholder="搜索表、字段、注释或语义"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                 />
                 <button className="btn btn-primary btn-sm" onClick={handleSearch} disabled={!searchQuery.trim()}>
-                  Search
+                  搜索
                 </button>
               </div>
 
@@ -317,13 +323,13 @@ export default function AtlasPage() {
               {searchResult && (
                 <div className="card mb-md fade-up">
                   <div className="card-head">
-                    <h3>Search Results</h3>
-                    <button className="btn btn-ghost btn-sm" onClick={() => setSearchResult(null)}>Clear</button>
+                    <h3>搜索结果</h3>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setSearchResult(null)}>清除</button>
                   </div>
                   <div className="card-body">
                     {searchResult.matched_table.length > 0 && (
                       <div className="mb-md">
-                        <div className="field-label mb-sm">Matched Tables ({searchResult.matched_table.length})</div>
+                        <div className="field-label mb-sm">匹配的表 ({searchResult.matched_table.length})</div>
                         <div className="row gap-sm wrap">
                           {searchResult.matched_table.map((t) => (
                             <span
@@ -340,7 +346,7 @@ export default function AtlasPage() {
                     )}
                     {searchResult.matched_column.length > 0 && (
                       <div>
-                        <div className="field-label mb-sm">Matched Columns ({searchResult.matched_column.length})</div>
+                        <div className="field-label mb-sm">匹配的字段 ({searchResult.matched_column.length})</div>
                         {searchResult.matched_column.map((c, i) => (
                           <div key={i} className="row gap-sm mb-sm" style={{ fontSize: 12 }}>
                             <span className="mono" style={{ color: "var(--teal)", cursor: "pointer" }}
@@ -355,7 +361,7 @@ export default function AtlasPage() {
                     )}
                     {searchResult.matched_table.length === 0 && searchResult.matched_column.length === 0 && (
                       <div className="empty" style={{ padding: 16 }}>
-                        <div className="empty-text">No matches found</div>
+                        <div className="empty-text">没有找到匹配项</div>
                       </div>
                     )}
                   </div>
@@ -372,7 +378,7 @@ export default function AtlasPage() {
                       </h3>
                       {selectedTable.engine && <span className="badge badge-dim">{selectedTable.engine}</span>}
                       {selectedTable.row_count_approx > 0 && (
-                        <span className="badge badge-dim">~{selectedTable.row_count_approx.toLocaleString()} rows</span>
+                        <span className="badge badge-dim">约 {selectedTable.row_count_approx.toLocaleString()} 行</span>
                       )}
                     </div>
                     <button
@@ -386,7 +392,7 @@ export default function AtlasPage() {
                         })
                       }
                     >
-                      Query in Lens
+                      在 Lens 查询
                     </button>
                   </div>
                   {selectedTable.comment && (
@@ -398,13 +404,13 @@ export default function AtlasPage() {
                     <table className="dtable">
                       <thead>
                         <tr>
-                          <th>Column</th>
-                          <th>Type</th>
-                          <th>Nullable</th>
-                          <th>Key</th>
-                          <th>Comment</th>
-                          <th>Semantic</th>
-                          <th>Actions</th>
+                          <th>字段</th>
+                          <th>类型</th>
+                          <th>可空</th>
+                          <th>键</th>
+                          <th>注释</th>
+                          <th>语义</th>
+                          <th>操作</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -427,7 +433,7 @@ export default function AtlasPage() {
                               {col.semantic ? (
                                 <span className="badge badge-teal">{col.semantic}</span>
                               ) : (
-                                <span style={{ color: "var(--t4)", fontSize: 11 }}>none</span>
+                                <span style={{ color: "var(--t4)", fontSize: 11 }}>未标注</span>
                               )}
                             </td>
                             <td>
@@ -441,7 +447,7 @@ export default function AtlasPage() {
                                   setTab("annotations" as Tab);
                                 }}
                               >
-                                Annotate
+                                标注
                               </button>
                             </td>
                           </tr>
@@ -452,14 +458,14 @@ export default function AtlasPage() {
                 </div>
               ) : tableLoading ? (
                 <div className="card">
-                  <div className="card-body"><div className="empty"><div className="empty-text">Loading...</div></div></div>
+                  <div className="card-body"><div className="empty"><div className="empty-text">加载中...</div></div></div>
                 </div>
               ) : (
                 <div className="card fade-up">
                   <div className="card-body">
                     <div className="empty" style={{ height: 300 }}>
                       <div className="empty-icon">{"\u2637"}</div>
-                      <div className="empty-text">Select a table from the left to view its structure</div>
+                      <div className="empty-text">从左侧选择一张表查看结构</div>
                     </div>
                   </div>
                 </div>
@@ -473,39 +479,39 @@ export default function AtlasPage() {
           <div className="fade-up">
             {/* Add annotation form */}
             <div className="card mb-md">
-              <div className="card-head"><h3>Add Semantic Annotation</h3></div>
+              <div className="card-head"><h3>新增语义标注</h3></div>
               <div className="card-body">
                 <div className="row gap-sm mb-sm">
                   <div style={{ flex: 1 }}>
-                    <div className="field-label mb-sm">Database</div>
+                    <div className="field-label mb-sm">数据库</div>
                     <select className="input" value={annotateDb} onChange={(e) => setAnnotateDb(e.target.value)}>
-                      <option value="">select...</option>
+                      <option value="">请选择...</option>
                       {databases.map((d) => <option key={d.database} value={d.database}>{d.database}</option>)}
                     </select>
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div className="field-label mb-sm">Table</div>
+                    <div className="field-label mb-sm">表</div>
                     <input className="input" value={annotateTable} onChange={(e) => setAnnotateTable(e.target.value)} placeholder="table_name" />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div className="field-label mb-sm">Column</div>
+                    <div className="field-label mb-sm">字段</div>
                     <input className="input" value={annotateCol} onChange={(e) => setAnnotateCol(e.target.value)} placeholder="column_name" />
                   </div>
                 </div>
                 <div className="row gap-sm">
                   <div style={{ flex: 1 }}>
-                    <div className="field-label mb-sm">Semantic Description</div>
+                    <div className="field-label mb-sm">语义说明</div>
                     <input
                       className="input"
                       value={annotateSemantic}
                       onChange={(e) => setAnnotateSemantic(e.target.value)}
-                      placeholder="e.g. user's phone number, order creation time..."
+                      placeholder="例如：用户手机号、订单创建时间"
                       onKeyDown={(e) => e.key === "Enter" && handleAnnotate()}
                     />
                   </div>
                   <div style={{ paddingTop: 22 }}>
                     <button className="btn btn-primary" onClick={handleAnnotate} disabled={annotating || !annotateDb || !annotateTable || !annotateCol || !annotateSemantic}>
-                      {annotating ? <><span className="spinner" /> Saving</> : "Save"}
+                      {annotating ? <><span className="spinner" /> 保存中</> : "保存"}
                     </button>
                   </div>
                 </div>
@@ -516,12 +522,12 @@ export default function AtlasPage() {
             <div className="card">
               <div className="card-head">
                 <h3>
-                  Annotations
+                  语义标注
                   {selectedDb && <span style={{ color: "var(--teal)", marginLeft: 6, textTransform: "none" }}>({selectedDb})</span>}
                 </h3>
                 <div className="row gap-sm">
                   <select className="input" style={{ width: 160 }} value={selectedDb} onChange={(e) => setSelectedDb(e.target.value)}>
-                    <option value="">select database...</option>
+                    <option value="">选择数据库...</option>
                     {databases.map((d) => <option key={d.database} value={d.database}>{d.database}</option>)}
                   </select>
                   <span className="badge badge-teal">{annotations.length}</span>
@@ -532,11 +538,11 @@ export default function AtlasPage() {
                   <table className="dtable">
                     <thead>
                       <tr>
-                        <th>Table.Column</th>
-                        <th>Semantic</th>
-                        <th>Source</th>
-                        <th>Status</th>
-                        <th>Actions</th>
+                        <th>表.字段</th>
+                        <th>语义</th>
+                        <th>来源</th>
+                        <th>状态</th>
+                        <th>操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -547,7 +553,7 @@ export default function AtlasPage() {
                           <td><span className={`badge ${ann.source === "manual" ? "badge-amber" : ann.source === "ai" ? "badge-violet" : "badge-dim"}`}>{ann.source}</span></td>
                           <td>
                             <span className={`badge ${ann.confirmed ? "badge-emerald" : "badge-warn"}`}>
-                              {ann.confirmed ? "confirmed" : "pending"}
+                              {ann.confirmed ? "已确认" : "待确认"}
                             </span>
                           </td>
                           <td>
@@ -555,11 +561,11 @@ export default function AtlasPage() {
                               <div className="row gap-xs">
                                 <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: "2px 6px", color: "var(--emerald)" }}
                                   onClick={() => handleConfirm(ann, true)}>
-                                  Confirm
+                                  确认
                                 </button>
                                 <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: "2px 6px", color: "var(--coral)" }}
                                   onClick={() => handleConfirm(ann, false)}>
-                                  Reject
+                                  驳回
                                 </button>
                               </div>
                             )}
@@ -571,7 +577,7 @@ export default function AtlasPage() {
                 ) : (
                   <div className="empty" style={{ padding: 24 }}>
                     <div className="empty-text">
-                      {selectedDb ? "No annotations for this database" : "Select a database to view annotations"}
+                      {selectedDb ? "这个数据库还没有语义标注" : "请选择数据库查看语义标注"}
                     </div>
                   </div>
                 )}
@@ -585,19 +591,27 @@ export default function AtlasPage() {
           <div className="fade-up">
             <div className="row gap-sm mb-md">
               <button className="btn btn-primary btn-sm" onClick={handleRefreshServices} disabled={refreshing}>
-                {refreshing ? <><span className="spinner" /> Refreshing</> : "Refresh Services"}
+                {refreshing ? <><span className="spinner" /> 刷新中</> : "刷新服务"}
               </button>
             </div>
+            {targetService && !services.some((svc) => svc.name === targetService) && (
+              <div className="card mb-md" style={{ borderLeftColor: "var(--warn)", borderLeftWidth: 3 }}>
+                <div className="card-body" style={{ fontSize: 12, color: "var(--warn)", lineHeight: 1.7 }}>
+                  Probe 链路中出现了服务 <span className="mono">{targetService}</span>，但 Atlas 当前服务发现结果里没有对应条目。
+                  这通常表示 Atlas 的服务发现尚未采集到业务服务，或服务名和日志进程名不完全一致。
+                </div>
+              </div>
+            )}
             <div className="card">
               <div className="card-head">
-                <h3>Discovered Services</h3>
+                <h3>已发现服务</h3>
                 <span className="badge badge-teal">{services.length}</span>
               </div>
               <div className="card-body flush" style={{ overflowX: "auto" }}>
                 {services.length > 0 ? (
                   <table className="dtable">
                     <thead>
-                      <tr><th>Name</th><th>Status</th><th>PID</th><th>Deploy Path</th><th>Log Path</th><th>Databases</th></tr>
+                      <tr><th>名称</th><th>状态</th><th>PID</th><th>部署路径</th><th>日志路径</th><th>数据库</th></tr>
                     </thead>
                     <tbody>
                       {services.map((svc) => (
@@ -620,7 +634,7 @@ export default function AtlasPage() {
                     </tbody>
                   </table>
                 ) : (
-                  <div className="empty"><div className="empty-icon">{"\u2B22"}</div><div className="empty-text">No services found</div></div>
+                  <div className="empty"><div className="empty-icon">{"\u2B22"}</div><div className="empty-text">还没有发现服务</div></div>
                 )}
               </div>
             </div>
