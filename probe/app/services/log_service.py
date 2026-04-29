@@ -97,6 +97,13 @@ def _grep_results_to_items(results: list[tuple[str, int, str]]) -> list[LogItem]
     return items
 
 
+def _items_time_range(items: list[LogItem]) -> dict[str, str]:
+    timestamps = [item.timestamp for item in items if item.timestamp]
+    if not timestamps:
+        return {"start": "", "end": ""}
+    return {"start": timestamps[0], "end": timestamps[-1]}
+
+
 def _parsed_to_trace_item(parsed: dict, compact_max: int = 0) -> TraceItem:
     """将 parse_log_line 的结果转为精简的 TraceItem。
 
@@ -416,7 +423,13 @@ async def tail_errors(hours_back: int = 1, keyword: str | None = None, limit: in
         _audit("tail_errors", params, total, truncated)
         return SearchResult(
             query=params,
-            summary={"total_matches": total, "returned": len(items), "truncated": truncated},
+            summary={
+                "total_matches": total,
+                "returned": len(items),
+                "limit": limit,
+                "truncated": truncated,
+                "time_range": _items_time_range(items),
+            },
             items=items,
             next_actions=["context_around_match", "search_by_request_id"],
         )

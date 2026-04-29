@@ -74,7 +74,7 @@ async def search_logs(
         start_time: 开始时间 ISO格式如 '2026-03-18T15:00:00'，默认最近1小时
         end_time: 结束时间 ISO格式，默认当前时间
         level: 日志级别 (INF/WAR/ERR/DBG)，不填则全部
-        limit: 最大返回条数，默认20，上限50
+        limit: 最大返回条数，默认20，上限500
     """
     result = await log_service.search_logs(keyword, start_time, end_time, level, limit)
     return _with_token_stats(json.dumps(result.model_dump(), ensure_ascii=False))
@@ -93,7 +93,7 @@ async def tail_errors(
     Args:
         hours_back: 往前查多少小时，默认1
         keyword: 额外过滤词（如 'timeout'、'hlopen'），不填则看全部 ERR
-        limit: 最大返回条数，默认30，上限50
+        limit: 最大返回条数，默认30，上限500
     """
     result = await log_service.tail_errors(hours_back, keyword, limit)
     return _with_token_stats(json.dumps(result.model_dump(), ensure_ascii=False))

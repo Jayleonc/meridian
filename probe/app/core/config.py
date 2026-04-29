@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 
 class LimitsConfig(BaseModel):
-    max_lines: int = 50                    # search_logs / tail_errors 的最大返回行数
+    max_lines: int = 500                   # search_logs / tail_errors 的最大返回行数
     max_bytes: int = 65536                 # 预留：单次返回的最大字节数
     max_time_range_hours: int = 24         # 搜索时间范围上限（小时）
     command_timeout_seconds: int = 10      # 外部命令（glog.sh / grep）超时秒数

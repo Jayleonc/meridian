@@ -20,14 +20,15 @@ export default function ProbePage() {
 
   // ── Error feed (live polling) ──
   const [hoursBack, setHoursBack] = useState(1);
+  const [errorLimit, setErrorLimit] = useState(200);
   const prevIds = useRef<Set<string>>(new Set());
 
   const errorFetcher = useCallback(
-    () => probe.tailErrors(hoursBack, 50),
-    [hoursBack]
+    () => probe.tailErrors(hoursBack, errorLimit),
+    [hoursBack, errorLimit]
   );
   const { data: errorData, loading: errorLoading } = usePolling(
-    errorFetcher, tab === "errors" ? 10000 : 0, [hoursBack]
+    errorFetcher, tab === "errors" ? 10000 : 0, [hoursBack, errorLimit]
   );
 
   // Track new items for animation
@@ -153,9 +154,20 @@ export default function ProbePage() {
               <select className="input" style={{ width: 140 }} value={hoursBack} onChange={(e) => setHoursBack(Number(e.target.value))}>
                 {[1, 2, 4, 8, 12, 24].map((h) => <option key={h} value={h}>Past {h}h</option>)}
               </select>
+              <select className="input" style={{ width: 130 }} value={errorLimit} onChange={(e) => setErrorLimit(Number(e.target.value))}>
+                {[50, 100, 200, 500].map((n) => <option key={n} value={n}>Latest {n}</option>)}
+              </select>
               {errorLoading && <span className="badge badge-amber"><span className="spinner" /> Polling...</span>}
               {errorData && (
-                <span className="badge badge-coral">{errorData.summary.total_matches} errors</span>
+                <>
+                  <span className="badge badge-coral">{errorData.summary.returned} shown</span>
+                  {errorData.summary.time_range?.start && (
+                    <span className="badge badge-teal">
+                      {formatLogTime(errorData.summary.time_range.start)} - {formatLogTime(errorData.summary.time_range.end)}
+                    </span>
+                  )}
+                  {errorData.summary.truncated && <span className="badge badge-warn">truncated</span>}
+                </>
               )}
             </div>
 

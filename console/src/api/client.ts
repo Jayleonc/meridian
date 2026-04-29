@@ -167,7 +167,13 @@ export interface LogItem {
 
 export interface SearchResult {
   query: Record<string, unknown>;
-  summary: { total_matches: number; returned: number; truncated: boolean };
+  summary: {
+    total_matches: number;
+    returned: number;
+    limit?: number;
+    truncated: boolean;
+    time_range?: { start: string; end: string };
+  };
   items: LogItem[];
   next_actions?: string[];
 }

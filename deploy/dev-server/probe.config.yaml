@@ -6,7 +6,7 @@ server:
   audit_log_path: ./audit.log
 
 limits:
-  max_lines: 50
+  max_lines: 500
   max_bytes: 65536
   max_time_range_hours: 24
   command_timeout_seconds: 10
