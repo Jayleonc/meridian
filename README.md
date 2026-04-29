@@ -60,6 +60,21 @@ http://<dev-server>:3000
 
 Console 静态资源由 Nexus 托管，Console 的所有后端请求仍走 `/api/*`、`/svc/*`、`/api/chat/*`、`/mcp/*`，不需要额外开放 `3010`。
 
+如果开发服务器没有 PostgreSQL，可以只用 Docker 启动 Meridian 平台库，不需要重启 Docker daemon：
+
+```bash
+docker-compose -f docker-compose.pg.yml up -d
+docker-compose -f docker-compose.pg.yml ps
+```
+
+这个 compose 会在本机开放 `127.0.0.1:15432`，并使用当前 Atlas / Lens 配置：
+
+```text
+database: meridian
+user: root
+password: jayleonc
+```
+
 如果开发服务器 Node 版本太旧，可以直接使用仓库内预构建的 Console 静态产物：
 
 ```bash

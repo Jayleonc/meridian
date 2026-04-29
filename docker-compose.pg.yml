@@ -1,0 +1,24 @@
+version: "3.7"
+
+services:
+  meridian-postgres:
+    image: postgres:16-alpine
+    container_name: meridian-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: meridian
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: jayleonc
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - meridian_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d meridian"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  meridian_pgdata:
