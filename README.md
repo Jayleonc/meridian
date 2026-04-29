@@ -186,6 +186,13 @@ MERIDIAN_MODEL_API_KEY=<api-key-or-placeholder>
 
 启动 Nexus 与 Console 后访问 `/chat`。Agent 当前可通过 Nexus 调用 Probe 的日志搜索、错误巡检、request_id 追踪、服务列表和日志上下文工具。
 
+Agent 单轮请求默认最多等待 60 秒，单次模型请求默认最多等待 45 秒，避免模型网关或网络问题让 Console 一直停在 Thinking：
+
+```env
+MERIDIAN_AGENT_TURN_TIMEOUT_SECONDS=60
+MERIDIAN_MODEL_REQUEST_TIMEOUT_SECONDS=45
+```
+
 Nexus 内部 Agent 结构：
 
 ```text

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.agent.config import get_chat_config, model_api_key
+from src.agent.config import MODEL_REQUEST_TIMEOUT_SECONDS, get_chat_config, model_api_key
 from src.agent.models import ChatConfig, ModelProviderError
 
 
@@ -42,6 +42,7 @@ class LangChainModelAdapter:
             "model": self.config.model,
             "api_key": api_key,
             "temperature": 0,
+            "timeout": MODEL_REQUEST_TIMEOUT_SECONDS,
         }
         if self.config.base_url:
             kwargs["base_url"] = self.config.base_url
