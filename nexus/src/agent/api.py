@@ -121,7 +121,12 @@ def create_chat_router(tool_executor: ToolExecutor, session_store: SessionStore 
                     runtime.run(session.messages),
                     timeout=AGENT_TURN_TIMEOUT_SECONDS,
                 )
-            except TimeoutError as exc:
+            except TimeoutError:
+                detail = (
+                    f"Agent 响应超时（{AGENT_TURN_TIMEOUT_SECONDS}s）。"
+                    "这次消息已记录，但模型或工具链路没有在限制时间内返回可用结果。"
+                    "请稍后重试，或补充更精确的时间范围后重新查询。"
+                )
                 logger.warning(
                     "Agent turn timed out after %s seconds: session=%s provider=%s model=%s",
                     AGENT_TURN_TIMEOUT_SECONDS,
@@ -129,15 +134,29 @@ def create_chat_router(tool_executor: ToolExecutor, session_store: SessionStore 
                     adapter.config.provider,
                     adapter.config.model,
                 )
-                raise HTTPException(
-                    status_code=504,
-                    detail=(
-                        f"Agent 响应超时（{AGENT_TURN_TIMEOUT_SECONDS}s）。"
-                        "请检查模型网关/API Key/网络连通性，或缩小问题范围后重试。"
-                    ),
-                ) from exc
+                assistant = await sessions.add_assistant_message(session, detail, [])
+                return ChatTurnResponse(
+                    session_id=session.id,
+                    provider=adapter.config.provider,
+                    model=adapter.config.model,
+                    assistant=assistant,
+                    tool_calls=[],
+                    session=session,
+                )
             except ModelProviderError as exc:
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
+                detail = (
+                    f"模型调用失败：{exc}。"
+                    "这次消息已记录，请检查模型网关/API Key/网络连通性后重试。"
+                )
+                assistant = await sessions.add_assistant_message(session, detail, [])
+                return ChatTurnResponse(
+                    session_id=session.id,
+                    provider=adapter.config.provider,
+                    model=adapter.config.model,
+                    assistant=assistant,
+                    tool_calls=[],
+                    session=session,
+                )
 
             assistant = await sessions.add_assistant_message(
                 session,

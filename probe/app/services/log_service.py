@@ -415,6 +415,10 @@ async def search_by_request_id(
             hint=hint,
             next_actions=["search_logs", "context_around_match", "search_by_request_id_include_full"],
         )
+    except TimeoutError as e:
+        detail = str(e) or "日志搜索超时"
+        _audit("search_by_request_id", params, 0, False, detail)
+        return _timeout_trace_summary(request_id, back_hours, detail)
     except Exception as e:
         _audit("search_by_request_id", params, 0, False, str(e))
         raise
@@ -440,6 +444,7 @@ async def _search_request_id_from_files(
         files,
         request_id,
         settings.limits.max_lines,
+        extra_args=["-F"],
         include_full_lines=include_full,
     )
     return [line for _, _, line in results]
@@ -509,6 +514,41 @@ def _build_search_hint(
                 )
 
     return " ".join(hints)
+
+
+def _timeout_trace_summary(request_id: str, back_hours: int, detail: str) -> TraceSummary:
+    timeout_seconds = settings.limits.command_timeout_seconds
+    message = (
+        f"Probe 搜索 request_id 时超时：{detail}。"
+        f"当前外部命令超时阈值为 {timeout_seconds}s，back_hours={back_hours}。"
+    )
+    return TraceSummary(
+        request_id=request_id,
+        total_lines=0,
+        time_range="搜索超时",
+        searched_hours=back_hours,
+        services=["probe"],
+        error_count=1,
+        warn_count=0,
+        errors=[
+            TraceItem(
+                timestamp="",
+                level="ERR",
+                service="probe",
+                source="log_service.search_by_request_id",
+                message=message,
+            )
+        ],
+        warns=[],
+        timeline=[],
+        raw_lines=[],
+        hint=(
+            "[搜索超时] 未能在当前时间范围内完成日志扫描。"
+            "请让用户提供更精确的发生时间并用 hint_time 重试，"
+            "或缩小 back_hours 后重新搜索。"
+        ),
+        next_actions=["search_by_request_id_with_hint_time", "search_logs_narrower_range"],
+    )
 
 
 async def search_logs(

@@ -29,6 +29,7 @@ class ChatApiConcurrencyTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.original_runtime = chat_api.AgentRuntime
         self.original_adapter = chat_api.LangChainModelAdapter
+        self.original_turn_timeout = chat_api.AGENT_TURN_TIMEOUT_SECONDS
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.runtime_calls = 0
@@ -59,6 +60,7 @@ class ChatApiConcurrencyTest(unittest.IsolatedAsyncioTestCase):
         await self.client.aclose()
         chat_api.AgentRuntime = self.original_runtime
         chat_api.LangChainModelAdapter = self.original_adapter
+        chat_api.AGENT_TURN_TIMEOUT_SECONDS = self.original_turn_timeout
 
     async def test_concurrent_turn_is_rejected_before_duplicate_user_message(self) -> None:
         created = await self.client.post("/api/chat/sessions", json={"title": "test"})
@@ -100,3 +102,30 @@ class ChatApiConcurrencyTest(unittest.IsolatedAsyncioTestCase):
         messages = completed.json()["session"]["messages"]
         self.assertEqual([message["role"] for message in messages], ["user", "assistant"])
         self.assertEqual(messages[0]["content"], "same question")
+
+    async def test_timeout_turn_writes_visible_assistant_message(self) -> None:
+        class HangingRuntime:
+            def __init__(self, adapter, tool_executor) -> None:
+                self.adapter = adapter
+                self.tool_executor = tool_executor
+
+            async def run(self, messages):
+                await asyncio.sleep(1)
+                return "too late", []
+
+        chat_api.AgentRuntime = HangingRuntime
+        chat_api.AGENT_TURN_TIMEOUT_SECONDS = 0.01
+
+        created = await self.client.post("/api/chat/sessions", json={"title": "test"})
+        self.assertEqual(created.status_code, 200)
+        session_id = created.json()["id"]
+
+        response = await self.client.post(
+            f"/api/chat/sessions/{session_id}/messages",
+            json={"content": "will timeout"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        messages = response.json()["session"]["messages"]
+        self.assertEqual([message["role"] for message in messages], ["user", "assistant"])
+        self.assertIn("Agent 响应超时", messages[1]["content"])

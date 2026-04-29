@@ -139,6 +139,32 @@ async def test_search_by_request_id_falls_back_to_hourly_logs(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_search_by_request_id_returns_structured_timeout(tmp_path, monkeypatch):
+    request_id = "6BxBGu52SRiqyyX8uawA"
+    log_file = tmp_path / "2026042918.log"
+    log_file.write_text("irrelevant")
+
+    async def empty_glog(_request_id: str, _back_hours: int = 0) -> str:
+        return ""
+
+    async def timeout_grep(*_args, **_kwargs):
+        raise TimeoutError("grep 超时")
+
+    monkeypatch.setattr(log_service.glog_adapter, "glog_search", empty_glog)
+    monkeypatch.setattr(file_adapter, "get_recent_hourly_files", lambda _hours_back: [log_file])
+    monkeypatch.setattr(file_adapter, "grep_files", timeout_grep)
+
+    result = await log_service.search_by_request_id(request_id, back_hours=1)
+
+    assert result.total_lines == 0
+    assert result.error_count == 1
+    assert result.services == ["probe"]
+    assert result.time_range == "搜索超时"
+    assert "grep 超时" in result.errors[0].message
+    assert "hint_time" in result.hint
+
+
+@pytest.mark.asyncio
 async def test_search_by_request_id_can_return_full_glog_lines(monkeypatch):
     request_id = "x795vTUEvhiqwxF7krUA"
 
