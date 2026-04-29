@@ -285,6 +285,10 @@ async def search_by_request_id(
     try:
         raw = await glog_adapter.glog_search(request_id, back_hours)
         lines = [line for line in raw.splitlines() if line.strip()]
+        source = "glog"
+        if not lines:
+            lines = await _search_request_id_from_files(request_id, back_hours)
+            source = "hourly_log_file_fallback"
         total = len(lines)
 
         # 分类：错误 / 警告 / 普通
@@ -335,6 +339,11 @@ async def search_by_request_id(
 
         # 生成智能提示：帮助 Agent 判断是否需要扩大搜索
         hint = _build_search_hint(total, back_hours, services_seen, errors, time_range)
+        if source != "glog":
+            hint = (
+                f"[已自动降级] glog.sh 未返回结果，已改用小时日志文件搜索 request_id。"
+                f"{hint}"
+            )
 
         _audit("search_by_request_id", params, total, False)
         return TraceSummary(
@@ -354,6 +363,26 @@ async def search_by_request_id(
     except Exception as e:
         _audit("search_by_request_id", params, 0, False, str(e))
         raise
+
+
+async def _search_request_id_from_files(request_id: str, back_hours: int) -> list[str]:
+    """当 glog.sh 查不到时，退回到 Probe 本机小时日志文件搜索。
+
+    search_logs 本来就能搜到这类日志；这里把同样的文件证据接入 request_id
+    链路摘要，避免 Agent 被单一 adapter 的空结果误导。
+    """
+    if back_hours > 0:
+        files = file_adapter.get_recent_hourly_files(back_hours)
+    else:
+        now = datetime.now()
+        files = file_adapter.get_hourly_files(now.replace(minute=0, second=0, microsecond=0), now)
+    results = await file_adapter.grep_files(
+        files,
+        request_id,
+        settings.limits.max_lines,
+        include_full_lines=False,
+    )
+    return [line for _, _, line in results]
 
 
 def _build_search_hint(
