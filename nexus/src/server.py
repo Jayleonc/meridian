@@ -78,6 +78,7 @@ _registry: dict[str, dict[str, Any]] = {
             "probe.search_by_request_id",
             "probe.search_logs",
             "probe.tail_errors",
+            "probe.tail_service_logs",
             "probe.list_services",
             "probe.context_around_match",
         ],
@@ -262,6 +263,7 @@ async def _call_chat_tool(name: str, args: dict[str, Any]) -> Any:
             "/api/logs/search",
             json_body={
                 "keyword": args["keyword"],
+                "service": args.get("service"),
                 "start_time": args.get("start_time"),
                 "end_time": args.get("end_time"),
                 "level": args.get("level"),
@@ -276,8 +278,24 @@ async def _call_chat_tool(name: str, args: dict[str, Any]) -> Any:
             params=_clean_params(
                 {
                     "hours_back": args.get("hours_back", 1),
+                    "service": args.get("service"),
                     "keyword": args.get("keyword"),
                     "limit": args.get("limit", 30),
+                }
+            ),
+        )
+
+    if name == "probe_tail_service_logs":
+        service = str(args["service"])
+        return await _probe(
+            "GET",
+            f"/api/logs/services/{quote(service, safe='')}/tail",
+            params=_clean_params(
+                {
+                    "hours_back": args.get("hours_back", 1),
+                    "level": args.get("level"),
+                    "keyword": args.get("keyword"),
+                    "limit": args.get("limit", 50),
                 }
             ),
         )
@@ -387,6 +405,7 @@ async def probe_search_by_request_id(
 @mcp.tool(name="probe.search_logs")
 async def probe_search_logs(
     keyword: str,
+    service: str | None = None,
     start_time: str | None = None,
     end_time: str | None = None,
     level: str | None = None,
@@ -398,6 +417,7 @@ async def probe_search_logs(
         "/api/logs/search",
         json_body={
             "keyword": keyword,
+            "service": service,
             "start_time": start_time,
             "end_time": end_time,
             "level": level,
@@ -410,6 +430,7 @@ async def probe_search_logs(
 @mcp.tool(name="probe.tail_errors")
 async def probe_tail_errors(
     hours_back: int = 1,
+    service: str | None = None,
     keyword: str | None = None,
     limit: int = 30,
 ) -> str:
@@ -417,7 +438,33 @@ async def probe_tail_errors(
     data = await _probe(
         "GET",
         "/api/logs/errors",
-        params={"hours_back": hours_back, "keyword": keyword, "limit": limit},
+        params=_clean_params(
+            {"hours_back": hours_back, "service": service, "keyword": keyword, "limit": limit}
+        ),
+    )
+    return _json(data)
+
+
+@mcp.tool(name="probe.tail_service_logs")
+async def probe_tail_service_logs(
+    service: str,
+    hours_back: int = 1,
+    level: str | None = None,
+    keyword: str | None = None,
+    limit: int = 50,
+) -> str:
+    """通过 Probe 按服务查看最近日志。"""
+    data = await _probe(
+        "GET",
+        f"/api/logs/services/{quote(service, safe='')}/tail",
+        params=_clean_params(
+            {
+                "hours_back": hours_back,
+                "level": level,
+                "keyword": keyword,
+                "limit": limit,
+            }
+        ),
     )
     return _json(data)
 

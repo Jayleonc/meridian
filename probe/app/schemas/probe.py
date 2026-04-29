@@ -11,6 +11,7 @@ class LogItem(BaseModel):
     """单条日志"""
     timestamp: str
     level: str
+    service: str = ""          # 日志所属服务 / 进程名
     request_id: str | None = None
     source: str = ""           # 来源 file:line:func
     text: str                  # 日志正文（已截断）

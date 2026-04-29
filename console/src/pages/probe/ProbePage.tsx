@@ -6,13 +6,14 @@ import { usePolling } from "../../hooks/usePolling";
 import { probe, type LogContext, type LogItem, type SearchResult, type TraceSummary } from "../../api/client";
 import { formatLogTime } from "../../utils/time";
 
-type Tab = "errors" | "search" | "trace";
+type Tab = "errors" | "search" | "service" | "trace";
 
 export default function ProbePage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get("tab") as Tab) || "errors";
   const { toast } = useApp();
   const inv = useInvestigation();
+  const selectedServiceParam = params.get("svc") || "";
 
   function setTab(t: Tab) {
     setParams({ tab: t });
@@ -75,6 +76,62 @@ export default function ProbePage() {
     setSearchLoading(false);
   }
 
+  // ── Service logs ──
+  const [services, setServices] = useState<string[]>([]);
+  const [serviceFilter, setServiceFilter] = useState("");
+  const [selectedService, setSelectedService] = useState(selectedServiceParam);
+  const [serviceHoursBack, setServiceHoursBack] = useState(1);
+  const [serviceLimit, setServiceLimit] = useState(200);
+  const [serviceLevel, setServiceLevel] = useState("");
+  const [serviceKeyword, setServiceKeyword] = useState("");
+  const [serviceResult, setServiceResult] = useState<SearchResult | null>(null);
+  const [serviceLoading, setServiceLoading] = useState(false);
+  const [serviceSource, setServiceSource] = useState("");
+
+  async function loadServices() {
+    try {
+      const r = await probe.listServices();
+      setServices(r.services);
+      setServiceSource(r.source);
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "服务列表加载失败");
+    }
+  }
+
+  async function loadServiceLogs(service = selectedService) {
+    const name = service.trim();
+    if (!name) return;
+    setSelectedService(name);
+    setServiceLoading(true);
+    try {
+      const r = await probe.tailService(name, {
+        hoursBack: serviceHoursBack,
+        level: serviceLevel || undefined,
+        keyword: serviceKeyword.trim() || undefined,
+        limit: serviceLimit,
+        includeFull: true,
+      });
+      setServiceResult(r);
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "服务日志加载失败");
+    } finally {
+      setServiceLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (tab === "service") void loadServices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  useEffect(() => {
+    if (tab === "service" && selectedServiceParam) {
+      setSelectedService(selectedServiceParam);
+      void loadServiceLogs(selectedServiceParam);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, selectedServiceParam]);
+
   // ── Trace ──
   const initRid = params.get("rid") || "";
   const [requestId, setRequestId] = useState(initRid);
@@ -122,6 +179,7 @@ export default function ProbePage() {
     const parts = [
       item.timestamp,
       item.level,
+      item.service ? `[${item.service}]` : "",
       item.request_id ? `<${item.request_id}>` : "",
       item.source ? `[${item.source}]` : "",
       item.file && item.line_number ? `${item.file}:${item.line_number}` : "",
@@ -177,10 +235,14 @@ export default function ProbePage() {
     inv.push({
       type: "service",
       label: svc,
-      path: `/atlas?tab=services&svc=${svc}`,
+      path: `/probe?tab=service&svc=${svc}`,
       data: { service: svc },
     });
   }
+
+  const filteredServices = services.filter((svc) =>
+    svc.toLowerCase().includes(serviceFilter.trim().toLowerCase())
+  );
 
   return (
     <>
@@ -201,6 +263,10 @@ export default function ProbePage() {
             </button>
             <button className={`tab-btn ${tab === "search" ? "active" : ""}`} onClick={() => setTab("search")}>
               日志搜索
+            </button>
+            <button className={`tab-btn ${tab === "service" ? "active" : ""}`} onClick={() => setTab("service")}>
+              服务日志
+              {services.length > 0 && <span className="tab-count">{services.length}</span>}
             </button>
             <button className={`tab-btn ${tab === "trace" ? "active" : ""}`} onClick={() => setTab("trace")}>
               请求链路
@@ -317,6 +383,124 @@ export default function ProbePage() {
           </div>
         )}
 
+        {/* ════ SERVICE LOGS TAB ════ */}
+        {tab === "service" && (
+          <div className="fade-up service-log-layout">
+            <div className="card service-list-panel">
+              <div className="card-head">
+                <h3>服务列表</h3>
+                <span className="badge badge-teal">{services.length}</span>
+              </div>
+              <div className="card-body">
+                <div className="row gap-sm mb-sm">
+                  <input
+                    className="input"
+                    placeholder="过滤服务名"
+                    value={serviceFilter}
+                    onChange={(e) => setServiceFilter(e.target.value)}
+                  />
+                  <button className="btn btn-ghost btn-sm" onClick={() => void loadServices()}>刷新</button>
+                </div>
+                {serviceSource && <div className="field-label mb-sm">来源：{serviceSource}</div>}
+              </div>
+              <div className="card-body flush service-list">
+                {filteredServices.length > 0 ? (
+                  filteredServices.map((svc) => (
+                    <button
+                      key={svc}
+                      className={`service-list-item ${selectedService === svc ? "active" : ""}`}
+                      type="button"
+                      onClick={() => {
+                        setParams({ tab: "service", svc });
+                        void loadServiceLogs(svc);
+                      }}
+                    >
+                      {svc}
+                    </button>
+                  ))
+                ) : (
+                  <div className="empty" style={{ padding: 18 }}>
+                    <div className="empty-text">没有匹配的服务</div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="service-log-panel">
+              <div className="row gap-sm mb-md wrap">
+                <input
+                  className="input"
+                  style={{ minWidth: 220, flex: 1 }}
+                  placeholder="服务名，例如 jzadapter"
+                  value={selectedService}
+                  onChange={(e) => setSelectedService(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && loadServiceLogs()}
+                />
+                <select className="input" style={{ width: 140 }} value={serviceHoursBack} onChange={(e) => setServiceHoursBack(Number(e.target.value))}>
+                  {[1, 2, 4, 8, 12, 24].map((h) => <option key={h} value={h}>最近 {h} 小时</option>)}
+                </select>
+                <select className="input" style={{ width: 120 }} value={serviceLevel} onChange={(e) => setServiceLevel(e.target.value)}>
+                  <option value="">全部级别</option>
+                  <option value="ERR">ERR</option>
+                  <option value="WAR">WAR</option>
+                  <option value="INF">INF</option>
+                  <option value="DBG">DBG</option>
+                </select>
+                <select className="input" style={{ width: 130 }} value={serviceLimit} onChange={(e) => setServiceLimit(Number(e.target.value))}>
+                  {[50, 100, 200, 500].map((n) => <option key={n} value={n}>返回 {n} 条</option>)}
+                </select>
+                <input
+                  className="input"
+                  style={{ minWidth: 180 }}
+                  placeholder="可选关键词"
+                  value={serviceKeyword}
+                  onChange={(e) => setServiceKeyword(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && loadServiceLogs()}
+                />
+                <button className="btn btn-primary" onClick={() => loadServiceLogs()} disabled={serviceLoading || !selectedService.trim()}>
+                  {serviceLoading ? <><span className="spinner" /> 加载中</> : "查看日志"}
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => copyLogs(serviceResult, "服务日志")} disabled={!serviceResult?.items.length}>
+                  复制日志
+                </button>
+              </div>
+
+              {serviceResult && (
+                <>
+                  <div className="row gap-sm mb-md">
+                    <span className="badge badge-teal">显示 {serviceResult.summary.returned} 条</span>
+                    {serviceResult.summary.time_range?.start && (
+                      <span className="badge badge-teal">
+                        {formatLogTime(serviceResult.summary.time_range.start)} - {formatLogTime(serviceResult.summary.time_range.end)}
+                      </span>
+                    )}
+                    {serviceResult.summary.truncated && <span className="badge badge-warn">已到返回上限</span>}
+                  </div>
+                  <div className="card">
+                    <div className="card-body flush" style={{ maxHeight: "calc(100vh - 330px)", overflowY: "auto" }}>
+                      {serviceResult.items.length > 0 ? (
+                        serviceResult.items.map((item, i) => (
+                          <LogLineView
+                            key={i}
+                            item={item}
+                            onOpenContext={openContext}
+                            onTrace={traceLog}
+                            onCopy={(target) => copyText(formatLogItem(target), "单条日志")}
+                          />
+                        ))
+                      ) : (
+                        <div className="empty" style={{ padding: 24 }}>
+                          <div className="empty-text">这个服务在当前条件下没有日志</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ════ TRACE TAB ════ */}
         {tab === "trace" && (
           <div className="fade-up">
@@ -387,6 +571,7 @@ function LogLineView({
     >
       <span className="log-ts">{formatLogTime(item.timestamp)}</span>
       <span className={`log-level ${item.level}`}>{item.level || "--"}</span>
+      {item.service && <span className="log-service">[{item.service}]</span>}
       {item.source && <span className="log-svc">[{item.source}]</span>}
       <span className="log-msg">{item.text}</span>
       <span className="log-actions">

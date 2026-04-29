@@ -56,6 +56,7 @@ def _raw_lines_to_items(
             items.append(LogItem(
                 timestamp=parsed["timestamp"],
                 level=parsed["level"],
+                service=parsed["process"],
                 request_id=parsed["request_id"],
                 source=parsed["source"],
                 text=_maybe_redact(parsed["message"]),
@@ -86,6 +87,7 @@ def _grep_results_to_items(
             items.append(LogItem(
                 timestamp=parsed["timestamp"],
                 level=parsed["level"],
+                service=parsed["process"],
                 request_id=parsed["request_id"],
                 source=parsed["source"],
                 text=_maybe_redact(parsed["message"]),
@@ -108,6 +110,25 @@ def _items_time_range(items: list[LogItem]) -> dict[str, str]:
     if not timestamps:
         return {"start": "", "end": ""}
     return {"start": timestamps[0], "end": timestamps[-1]}
+
+
+def _service_log_pattern(
+    service: str,
+    *,
+    level: str | None = None,
+    keyword: str | None = None,
+) -> str:
+    """构造按服务过滤的日志正则。
+
+    Brick 日志行以 `service(pid,tid)` 开头，服务过滤必须锚定行首，避免普通 keyword
+    命中请求体或错误文本里的同名字符串。
+    """
+    parts = [rf"^{re.escape(service)}\("]
+    if level:
+        parts.append(rf".*\b{re.escape(level.upper())}\b")
+    if keyword:
+        parts.append(rf".*{re.escape(keyword)}")
+    return "".join(parts)
 
 
 def _parsed_to_trace_item(parsed: dict, compact_max: int = 0) -> TraceItem:
@@ -345,6 +366,7 @@ async def search_logs(
     level: str | None = None,
     limit: int = 20,
     include_full: bool = False,
+    service: str | None = None,
 ) -> SearchResult:
     """按关键词搜索日志，支持时间范围和级别过滤"""
     limit = min(limit, settings.limits.max_lines)
@@ -372,6 +394,7 @@ async def search_logs(
         "level": level,
         "limit": limit,
         "include_full": include_full,
+        "service": service,
     }
 
     try:
@@ -384,7 +407,16 @@ async def search_logs(
                 items=[],
             )
 
-        if level:
+        if service:
+            pattern = _service_log_pattern(service, level=level, keyword=keyword)
+            results = await file_adapter.grep_files(
+                files,
+                pattern,
+                limit,
+                ["-E"],
+                include_full_lines=include_full,
+            )
+        elif level:
             pattern = f"{level.upper()}.*{keyword}|{keyword}.*{level.upper()}"
             results = await file_adapter.grep_files(
                 files,
@@ -422,10 +454,17 @@ async def tail_errors(
     keyword: str | None = None,
     limit: int = 30,
     include_full: bool = False,
+    service: str | None = None,
 ) -> SearchResult:
     """查看最近的错误日志"""
     limit = min(limit, settings.limits.max_lines)
-    params = {"hours_back": hours_back, "keyword": keyword, "limit": limit, "include_full": include_full}
+    params = {
+        "hours_back": hours_back,
+        "keyword": keyword,
+        "limit": limit,
+        "include_full": include_full,
+        "service": service,
+    }
 
     try:
         files = file_adapter.get_recent_hourly_files(hours_back)
@@ -437,7 +476,10 @@ async def tail_errors(
                 items=[],
             )
 
-        pattern = f"ERR.*{keyword}" if keyword else "ERR"
+        if service:
+            pattern = _service_log_pattern(service, level="ERR", keyword=keyword)
+        else:
+            pattern = f"ERR.*{keyword}" if keyword else "ERR"
         results = await file_adapter.grep_files(
             files,
             pattern,
@@ -466,6 +508,67 @@ async def tail_errors(
         )
     except Exception as e:
         _audit("tail_errors", params, 0, False, str(e))
+        raise
+
+
+async def tail_service_logs(
+    service: str,
+    hours_back: int = 1,
+    level: str | None = None,
+    keyword: str | None = None,
+    limit: int = 200,
+    include_full: bool = False,
+) -> SearchResult:
+    """按服务查看最近日志。"""
+    limit = min(limit, settings.limits.max_lines)
+    params = {
+        "service": service,
+        "hours_back": hours_back,
+        "level": level,
+        "keyword": keyword,
+        "limit": limit,
+        "include_full": include_full,
+    }
+
+    try:
+        files = file_adapter.get_recent_hourly_files(hours_back)
+        if not files:
+            _audit("tail_service_logs", params, 0, False)
+            return SearchResult(
+                query=params,
+                summary={"total_matches": 0, "returned": 0, "truncated": False},
+                items=[],
+            )
+
+        pattern = _service_log_pattern(service, level=level, keyword=keyword)
+        results = await file_adapter.grep_files(
+            files,
+            pattern,
+            limit,
+            ["-E"],
+            from_end=True,
+            include_full_lines=include_full,
+        )
+
+        total = len(results)
+        truncated = total >= limit
+        items = _grep_results_to_items(results, include_full=include_full)
+
+        _audit("tail_service_logs", params, total, truncated)
+        return SearchResult(
+            query=params,
+            summary={
+                "total_matches": total,
+                "returned": len(items),
+                "limit": limit,
+                "truncated": truncated,
+                "time_range": _items_time_range(items),
+            },
+            items=items,
+            next_actions=["context_around_match", "search_by_request_id"],
+        )
+    except Exception as e:
+        _audit("tail_service_logs", params, 0, False, str(e))
         raise
 
 

@@ -16,6 +16,7 @@ class ProbeSearchByRequestIdArgs(BaseModel):
 
 class ProbeSearchLogsArgs(BaseModel):
     keyword: str = Field(..., description="日志关键词。")
+    service: str | None = Field(None, description="可选服务名，按日志行开头的服务进程名过滤。")
     start_time: str | None = Field(None, description="可选开始时间。")
     end_time: str | None = Field(None, description="可选结束时间。")
     level: str | None = Field(None, description="可选日志级别，例如 ERR、WAR、INF。")
@@ -24,8 +25,17 @@ class ProbeSearchLogsArgs(BaseModel):
 
 class ProbeTailErrorsArgs(BaseModel):
     hours_back: int = Field(1, ge=1, le=168, description="向前查看错误日志的小时数。")
+    service: str | None = Field(None, description="可选服务名，限定只看某个服务的错误日志。")
     keyword: str | None = Field(None, description="可选关键词过滤。")
     limit: int = Field(30, ge=1, le=100, description="最多返回条数。")
+
+
+class ProbeTailServiceLogsArgs(BaseModel):
+    service: str = Field(..., description="服务名，来自 probe_list_services 或日志行进程名。")
+    hours_back: int = Field(1, ge=1, le=24, description="向前查看服务日志的小时数。")
+    level: str | None = Field(None, description="可选日志级别，例如 ERR、WAR、INF。")
+    keyword: str | None = Field(None, description="可选关键词过滤。")
+    limit: int = Field(50, ge=1, le=100, description="最多返回条数。")
 
 
 class ProbeListServicesArgs(BaseModel):
@@ -43,6 +53,7 @@ TOOL_ARG_MODELS: dict[str, type[BaseModel]] = {
     "probe_search_by_request_id": ProbeSearchByRequestIdArgs,
     "probe_search_logs": ProbeSearchLogsArgs,
     "probe_tail_errors": ProbeTailErrorsArgs,
+    "probe_tail_service_logs": ProbeTailServiceLogsArgs,
     "probe_list_services": ProbeListServicesArgs,
     "probe_context_around_match": ProbeContextAroundMatchArgs,
 }
@@ -51,6 +62,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "probe_search_by_request_id": "按 request_id 追踪完整日志链路，适合用户提供 request_id 时使用。",
     "probe_search_logs": "按关键词搜索日志，适合查询错误文本、异常类名、业务关键词。",
     "probe_tail_errors": "查看最近错误日志，适合用户询问最近有什么报错或系统是否异常。",
+    "probe_tail_service_logs": "按服务名查看最近日志，适合用户想直接查看某个服务的运行日志。",
     "probe_list_services": "列出当前 Probe 可观测到的服务。",
     "probe_context_around_match": "读取日志命中行上下文，适合进一步确认某条日志前后的调用细节。",
 }

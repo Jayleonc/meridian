@@ -616,7 +616,19 @@ export default function AtlasPage() {
                     <tbody>
                       {services.map((svc) => (
                         <tr key={svc.name} style={params.get("svc") === svc.name ? { background: "var(--amber-glow)" } : undefined}>
-                          <td className="mono">{svc.name}</td>
+                          <td
+                            className="mono link"
+                            onClick={() =>
+                              inv.push({
+                                type: "service",
+                                label: svc.name,
+                                path: `/probe?tab=service&svc=${svc.name}`,
+                                data: { service: svc.name },
+                              })
+                            }
+                          >
+                            {svc.name}
+                          </td>
                           <td><span className={`badge ${svc.status === "RUNNING" ? "badge-emerald" : "badge-coral"}`}>{svc.status}</span></td>
                           <td className="mono">{svc.pid || "\u2014"}</td>
                           <td className="mono truncate" style={{ maxWidth: 200, fontSize: 11 }}>{svc.deploy_path || "\u2014"}</td>

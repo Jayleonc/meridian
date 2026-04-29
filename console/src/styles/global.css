@@ -600,6 +600,7 @@ select.input option {
 .log-level.WAR { color: var(--warn); }
 .log-level.INF { color: var(--teal); }
 .log-level.DBG { color: var(--t4); }
+.log-service { color: var(--amber); flex-shrink: 0; }
 .log-svc { color: var(--violet); flex-shrink: 0; }
 .log-msg { color: var(--t2); overflow: hidden; text-overflow: ellipsis; }
 
@@ -677,6 +678,65 @@ select.input option {
 .log-context-line.match {
   background: var(--amber-glow);
   border-left-color: var(--amber);
+}
+
+.service-log-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.service-list-panel {
+  position: sticky;
+  top: 14px;
+  max-height: calc(100vh - 210px);
+  display: flex;
+  flex-direction: column;
+}
+
+.service-list {
+  overflow-y: auto;
+}
+
+.service-list-item {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border-0);
+  background: transparent;
+  color: var(--t2);
+  cursor: pointer;
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 8px 12px;
+  text-align: left;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+
+.service-list-item:hover {
+  background: rgba(255,255,255,0.03);
+  color: var(--t1);
+}
+
+.service-list-item.active {
+  background: var(--amber-glow);
+  color: var(--amber);
+}
+
+.service-log-panel {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .service-log-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .service-list-panel {
+    position: static;
+    max-height: 280px;
+  }
 }
 
 /* ══ Tabs ══ */

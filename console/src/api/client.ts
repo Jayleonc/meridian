@@ -158,6 +158,7 @@ export const atlas = {
 export interface LogItem {
   timestamp: string;
   level: string;
+  service?: string;
   request_id?: string | null;
   source: string;
   text: string;
@@ -227,6 +228,7 @@ export const probe = {
     level?: string;
     limit?: number;
     include_full?: boolean;
+    service?: string;
   }) =>
     request<SearchResult>("/api/probe/logs/search", {
       method: "POST",
@@ -241,6 +243,19 @@ export const probe = {
     request<LogContext>(
       `/api/probe/logs/context?file=${encodeURIComponent(file)}&line_number=${lineNumber}&before=${before}&after=${after}`
     ),
+  tailService: (
+    service: string,
+    opts?: { hoursBack?: number; level?: string; keyword?: string; limit?: number; includeFull?: boolean }
+  ) => {
+    const q = new URLSearchParams({
+      hours_back: String(opts?.hoursBack ?? 1),
+      limit: String(opts?.limit ?? 200),
+      include_full: opts?.includeFull ? "true" : "false",
+    });
+    if (opts?.level) q.set("level", opts.level);
+    if (opts?.keyword) q.set("keyword", opts.keyword);
+    return request<SearchResult>(`/api/probe/logs/services/${encodeURIComponent(service)}/tail?${q.toString()}`);
+  },
 };
 
 // ── Lens ──

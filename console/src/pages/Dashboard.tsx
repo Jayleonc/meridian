@@ -233,7 +233,7 @@ export default function Dashboard() {
                           inv.push({
                             type: "service",
                             label: svc.name,
-                            path: `/atlas?tab=services&svc=${svc.name}`,
+                            path: `/probe?tab=service&svc=${svc.name}`,
                             data: { service: svc.name },
                           })
                         }

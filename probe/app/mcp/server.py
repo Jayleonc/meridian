@@ -60,6 +60,7 @@ async def search_by_request_id(
 @mcp.tool(name="search_logs")
 async def search_logs(
     keyword: str,
+    service: str | None = None,
     start_time: str | None = None,
     end_time: str | None = None,
     level: str | None = None,
@@ -71,18 +72,20 @@ async def search_logs(
 
     Args:
         keyword: 搜索关键词（服务名、错误信息、接口路径等）
+        service: 可选服务名，按日志行开头的服务进程名过滤
         start_time: 开始时间 ISO格式如 '2026-03-18T15:00:00'，默认最近1小时
         end_time: 结束时间 ISO格式，默认当前时间
         level: 日志级别 (INF/WAR/ERR/DBG)，不填则全部
         limit: 最大返回条数，默认20，上限500
     """
-    result = await log_service.search_logs(keyword, start_time, end_time, level, limit)
+    result = await log_service.search_logs(keyword, start_time, end_time, level, limit, service=service)
     return _with_token_stats(json.dumps(result.model_dump(), ensure_ascii=False))
 
 
 @mcp.tool(name="tail_errors")
 async def tail_errors(
     hours_back: int = 1,
+    service: str | None = None,
     keyword: str | None = None,
     limit: int = 30,
 ) -> str:
@@ -92,10 +95,32 @@ async def tail_errors(
 
     Args:
         hours_back: 往前查多少小时，默认1
+        service: 可选服务名，限定只看某个服务的错误日志
         keyword: 额外过滤词（如 'timeout'、'hlopen'），不填则看全部 ERR
         limit: 最大返回条数，默认30，上限500
     """
-    result = await log_service.tail_errors(hours_back, keyword, limit)
+    result = await log_service.tail_errors(hours_back, keyword, limit, service=service)
+    return _with_token_stats(json.dumps(result.model_dump(), ensure_ascii=False))
+
+
+@mcp.tool(name="tail_service_logs")
+async def tail_service_logs(
+    service: str,
+    hours_back: int = 1,
+    level: str | None = None,
+    keyword: str | None = None,
+    limit: int = 50,
+) -> str:
+    """按服务查看最近日志。适用于：用户想直接看某个服务的日志。
+
+    Args:
+        service: 服务名，来自 list_services 或日志行进程名
+        hours_back: 往前查多少小时，默认1
+        level: 可选日志级别 (INF/WAR/ERR/DBG)
+        keyword: 可选关键词过滤
+        limit: 最大返回条数，默认50，上限500
+    """
+    result = await log_service.tail_service_logs(service, hours_back, level, keyword, limit)
     return _with_token_stats(json.dumps(result.model_dump(), ensure_ascii=False))
 
 

@@ -5,6 +5,7 @@ import pytest
 
 from app.adapters import file_adapter
 from app.core.config import load_settings
+from app.services import log_service
 
 
 @pytest.mark.asyncio
@@ -66,3 +67,22 @@ def test_load_settings_honors_probe_config_env(tmp_path, monkeypatch):
     loaded = load_settings()
 
     assert loaded.time.log_timezone == "UTC"
+
+
+@pytest.mark.asyncio
+async def test_service_log_pattern_matches_only_service_prefix(tmp_path):
+    log_file = tmp_path / "2026042912.log"
+    log_file.write_text(
+        "\n".join(
+            [
+                "jzadapter(1,1) 04-29T12:00:01.0000 INF source.go:1: started",
+                "hlopen(1,1) 04-29T12:00:02.0000 ERR source.go:2: jzadapter failed",
+                "jzadapter(1,1) 04-29T12:00:03.0000 ERR source.go:3: failed",
+            ]
+        )
+    )
+
+    pattern = log_service._service_log_pattern("jzadapter", level="ERR")
+    results = await file_adapter.grep_files([log_file], pattern, max_lines=10, extra_args=["-E"], from_end=True)
+
+    assert [line_number for _, line_number, _ in results] == [3]

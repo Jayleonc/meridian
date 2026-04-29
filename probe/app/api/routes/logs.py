@@ -10,6 +10,7 @@ from app.services.log_service import (
     get_services,
     search_by_request_id,
     search_logs,
+    tail_service_logs,
     tail_errors,
 )
 
@@ -22,10 +23,35 @@ async def list_services():
     return await get_services()
 
 
+@router.get("/services/{service}/tail")
+async def service_tail(
+    service: str,
+    hours_back: int = Query(1, ge=1, le=24),
+    level: str | None = Query(None),
+    keyword: str | None = Query(None),
+    limit: int = Query(200, ge=1, le=500),
+    include_full: bool = Query(False),
+):
+    """按服务查看最近日志"""
+    try:
+        result = await tail_service_logs(
+            service=service,
+            hours_back=hours_back,
+            level=level,
+            keyword=keyword,
+            limit=limit,
+            include_full=include_full,
+        )
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="日志搜索超时，请缩小时间范围或关键词后重试") from exc
+    return result.model_dump()
+
+
 @router.get("/errors")
 async def errors(
     hours_back: int = Query(1, ge=1, le=24),
     keyword: str | None = Query(None),
+    service: str | None = Query(None),
     limit: int = Query(30, ge=1, le=500),
     include_full: bool = Query(False),
 ):
@@ -34,6 +60,7 @@ async def errors(
         result = await tail_errors(
             hours_back=hours_back,
             keyword=keyword,
+            service=service,
             limit=limit,
             include_full=include_full,
         )
@@ -53,6 +80,7 @@ async def search(body: dict):
             level=body.get("level"),
             limit=body.get("limit", 20),
             include_full=bool(body.get("include_full", False)),
+            service=body.get("service"),
         )
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail="日志搜索超时，请缩小时间范围或关键词后重试") from exc

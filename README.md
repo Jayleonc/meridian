@@ -58,7 +58,7 @@ cp .env.example .env
 http://<dev-server>:3000
 ```
 
-Console 静态资源由 Nexus 托管，Console 的所有后端请求仍走 `/api/*`、`/svc/*`、`/api/chat/*`、`/mcp/*`，不需要额外开放 `3010`。
+Console 静态资源由 Nexus 托管，Console 的所有后端请求仍走 `/api/*`、`/svc/*`、`/api/chat/*`、`/mcp/*`，不需要额外开放 `3010`。Probe 页面支持按服务查看日志：从服务列表、Trace 服务节点或 Atlas 服务表点击服务名，会跳到 `/probe?tab=service&svc=<service>` 并直接读取该服务最近日志。
 
 如果开发服务器没有 PostgreSQL，可以只用 Docker 启动 Meridian 平台库，不需要重启 Docker daemon：
 
