@@ -165,3 +165,28 @@ def test_noise_filter_keeps_errors():
     )
 
     assert [item.line_number for item in items] == [2]
+
+
+def test_tail_summary_marks_stale_latest_match(tmp_path, monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            current = datetime(2026, 4, 29, 16, 13, tzinfo=ZoneInfo("Asia/Shanghai"))
+            return current if tz else current.replace(tzinfo=None)
+
+    monkeypatch.setattr(log_service, "datetime", FixedDateTime)
+    item = log_service.LogItem(
+        timestamp="04-29T15:25:34.7873",
+        level="INF",
+        service="hlopen",
+        source="rpc.go:1546:",
+        text="ok",
+        file="/data/brick/log/2026042915.log",
+        line_number=139735,
+    )
+
+    summary = log_service._tail_summary([item], limit=200, truncated=False, files=[tmp_path / "2026042916.log"])
+
+    assert summary["stale"] is True
+    assert summary["latest_age_seconds"] > 2700
+    assert "不代表服务当前仍在产生日志" in summary["hint"]

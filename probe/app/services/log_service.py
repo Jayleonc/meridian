@@ -112,6 +112,50 @@ def _items_time_range(items: list[LogItem]) -> dict[str, str]:
     return {"start": timestamps[0], "end": timestamps[-1]}
 
 
+def _tail_summary(items: list[LogItem], limit: int, truncated: bool, files: list) -> dict:
+    """构造 tail 类接口的摘要，并显式暴露“最新命中是否陈旧”。
+
+    tail_service_logs 返回的是指定窗口里的最近匹配，不代表服务当前仍有日志。
+    对值班排障来说，最新命中距今多久和扫描了哪些小时文件同样关键。
+    """
+    now = datetime.now(file_adapter._log_timezone())
+    summary = {
+        "total_matches": len(items),
+        "returned": len(items),
+        "limit": limit,
+        "truncated": truncated,
+        "time_range": _items_time_range(items),
+        "log_now": now.isoformat(),
+        "files_scanned": [str(file) for file in files],
+    }
+    if not items:
+        summary["stale"] = True
+        summary["hint"] = "当前时间窗口内没有匹配日志；这通常表示服务无新日志或服务名/过滤条件不匹配。"
+        return summary
+
+    latest = _parse_log_timestamp(items[-1].timestamp, now)
+    if latest is None:
+        return summary
+    age_seconds = max(0, int((now.replace(tzinfo=None) - latest).total_seconds()))
+    summary["latest_age_seconds"] = age_seconds
+    summary["stale"] = age_seconds > 300
+    if summary["stale"]:
+        summary["hint"] = f"最新匹配日志距当前约 {age_seconds} 秒；返回的是窗口内最后一次命中，不代表服务当前仍在产生日志。"
+    return summary
+
+
+def _parse_log_timestamp(timestamp: str, reference: datetime) -> datetime | None:
+    if not timestamp:
+        return None
+    for fmt in ("%m-%dT%H:%M:%S.%f", "%m-%dT%H:%M:%S"):
+        try:
+            parsed = datetime.strptime(timestamp, fmt)
+            return parsed.replace(year=reference.year)
+        except ValueError:
+            continue
+    return None
+
+
 def _service_log_pattern(
     service: str,
     *,
@@ -598,13 +642,7 @@ async def tail_errors(
         _audit("tail_errors", params, total, truncated)
         return SearchResult(
             query=params,
-            summary={
-                "total_matches": total,
-                "returned": len(items),
-                "limit": limit,
-                "truncated": truncated,
-                "time_range": _items_time_range(items),
-            },
+            summary=_tail_summary(items, limit, truncated, files),
             items=items,
             next_actions=["context_around_match", "search_by_request_id"],
         )
@@ -668,13 +706,7 @@ async def tail_service_logs(
         _audit("tail_service_logs", params, total, truncated)
         return SearchResult(
             query=params,
-            summary={
-                "total_matches": total,
-                "returned": len(items),
-                "limit": limit,
-                "truncated": truncated,
-                "time_range": _items_time_range(items),
-            },
+            summary=_tail_summary(items, limit, truncated, files),
             items=items,
             next_actions=["context_around_match", "search_by_request_id"],
         )
