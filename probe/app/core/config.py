@@ -31,6 +31,19 @@ class PathsConfig(BaseModel):
     glog_path: str = "/data/pinfire/tools/glog.sh"            # glog.sh 路径
 
 
+class OpsAggregationConfig(BaseModel):
+    """ops 日志聚合配置。
+
+    默认关闭。启用后 Probe 只按结构化参数调用预配置命令，不接收任意 shell。
+    """
+
+    enabled: bool = False
+    command_path: str = "/data/pinfire/tools/anlog.sh"
+    timeout_seconds: int = Field(default=10, gt=0)
+    allowed_hosts: list[str] = Field(default_factory=list)
+    max_hosts: int = Field(default=5, ge=1)
+
+
 class TimeConfig(BaseModel):
     log_timezone: str = "Asia/Shanghai"       # 小时日志文件名使用的业务日志时区
 
@@ -55,6 +68,7 @@ class Settings(BaseModel):
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    ops: OpsAggregationConfig = Field(default_factory=OpsAggregationConfig)
     time: TimeConfig = Field(default_factory=TimeConfig)
     atlas: AtlasConfig = Field(default_factory=AtlasConfig)
 

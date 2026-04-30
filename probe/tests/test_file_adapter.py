@@ -187,6 +187,59 @@ async def test_search_by_request_id_can_return_full_glog_lines(monkeypatch):
     assert "[91m" not in result.raw_lines[0]
 
 
+@pytest.mark.asyncio
+async def test_search_by_request_id_enriches_service_stats_and_suspects(monkeypatch):
+    request_id = "traceLiteReq001"
+
+    async def fake_glog(_request_id: str, _back_hours: int = 0) -> str:
+        return "\n".join(
+            [
+                f"edge(1,1) 04-29T15:39:30.0001 <{request_id}> INF edge.go:10: start",
+                f"auth(1,1) 04-29T15:39:31.0001 <{request_id}> WAR auth.go:20: token near expiry",
+                f"order(1,1) 04-29T15:39:32.0001 <{request_id}> INF order.go:30: create order",
+                f"pay(1,1) 04-29T15:39:33.0001 <{request_id}> ERR pay.go:40: payment timeout",
+                f"order(1,1) 04-29T15:39:34.0001 <{request_id}> WAR order.go:50: retry payment",
+            ]
+        )
+
+    monkeypatch.setattr(log_service.glog_adapter, "glog_search", fake_glog)
+
+    result = await log_service.search_by_request_id(request_id, back_hours=1)
+
+    assert result.request_id == request_id
+    assert result.total_lines == 5
+    assert result.time_range == "04-29T15:39:30.0001 ~ 04-29T15:39:34.0001"
+    assert result.services == ["edge", "auth", "order", "pay"]
+    assert result.error_count == 1
+    assert result.warn_count == 2
+    assert [item.service for item in result.timeline] == ["edge", "order"]
+
+    assert result.service_stats["edge"].total == 1
+    assert result.service_stats["edge"].error == 0
+    assert result.service_stats["edge"].warn == 0
+    assert result.service_stats["order"].total == 2
+    assert result.service_stats["order"].warn == 1
+    assert result.service_stats["order"].first_seen == "04-29T15:39:32.0001"
+    assert result.service_stats["order"].last_seen == "04-29T15:39:34.0001"
+    assert result.service_stats["pay"].error == 1
+
+    assert [(item.service, item.level) for item in result.suspects] == [
+        ("pay", "ERR"),
+        ("auth", "WAR"),
+        ("order", "WAR"),
+    ]
+    assert result.suspects[0].message == "payment timeout"
+    assert result.suspects[0].reason
+
+    dumped = result.model_dump()
+    assert dumped["service_stats"]["pay"]["error"] == 1
+    assert dumped["suspects"][0]["service"] == "pay"
+    assert "context_around_match" in dumped["next_actions"]
+    assert "tail_service_logs_for_suspect_services" in dumped["next_actions"]
+    assert "atlas_check_suspect_service_metadata" in dumped["next_actions"]
+    assert "lens_query_related_business_context" in dumped["next_actions"]
+
+
 def test_noise_filter_keeps_errors():
     items = log_service._filter_items(
         [

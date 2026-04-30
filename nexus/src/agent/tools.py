@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -51,6 +51,71 @@ class ProbeContextAroundMatchArgs(BaseModel):
     after: int = Field(10, ge=0, le=200, description="向后读取行数。")
 
 
+class ProbeSearchOpsLogsArgs(BaseModel):
+    service: str = Field(..., min_length=1, description="服务名。")
+    keyword: str = Field(..., min_length=1, description="日志关键词。")
+    hosts: list[str] = Field(..., min_length=1, description="要查询的业务主机列表，必须在 Probe ops 白名单内。")
+    hours_back: int = Field(1, ge=1, le=24, description="向前查看小时数。")
+    limit: int = Field(50, ge=1, le=100, description="最多返回条数。")
+
+
+class MeridianDiagnoseRequestArgs(BaseModel):
+    request_id: str = Field(..., min_length=1, description="需要诊断的 request_id。")
+    back_hours: int = Field(0, ge=0, le=72, description="向前回溯小时数。0 表示当前小时。")
+    hint_time: str | None = Field(None, description="可选日志时间提示。")
+    include_full: bool = Field(False, description="是否让 Probe 返回完整原始日志行。默认 false。")
+    include_lens_counts: bool = Field(True, description="是否对候选 Lens 实体执行 count。")
+    max_entities: int = Field(3, ge=0, le=5, description="最多尝试的 Lens 候选实体数量。")
+
+
+class AtlasListServicesArgs(BaseModel):
+    pass
+
+
+class AtlasSearchMetaArgs(BaseModel):
+    query: str = Field(..., min_length=1, description="元数据搜索关键词，例如服务名、表名、字段名或业务语义。")
+
+
+class AtlasGetTableArgs(BaseModel):
+    database: str = Field(..., min_length=1, description="数据库名。")
+    table: str = Field(..., min_length=1, description="表名。")
+
+
+class LensListEntitiesArgs(BaseModel):
+    pass
+
+
+class LensDescribeEntityArgs(BaseModel):
+    entity: str = Field(..., min_length=1, description="业务实体名称，来自 lens_list_entities。")
+
+
+class LensFilterConditionArgs(BaseModel):
+    field: str = Field(..., min_length=1, description="业务实体字段名。")
+    op: Literal["eq", "ne", "gt", "gte", "lt", "lte", "in", "like", "between"] = Field(
+        "eq",
+        description="筛选操作符。",
+    )
+    value: Any = Field(None, description="筛选值；in/between 可传数组。")
+
+
+class LensTimeRangeArgs(BaseModel):
+    start: str | None = Field(None, description="开始时间或日期。")
+    end: str | None = Field(None, description="结束时间或日期。")
+
+
+class LensQueryArgs(BaseModel):
+    entity: str = Field(..., min_length=1, description="业务实体名称。")
+    filter: list[LensFilterConditionArgs] = Field(
+        default_factory=list,
+        description="筛选条件列表；仍由 Lens 后端校验是否合法。",
+    )
+    field: list[str] | None = Field(None, description="要返回的字段；为空时使用实体默认字段。")
+    aggregate: Literal["count"] | None = Field(None, description='聚合模式；当前仅支持 "count"。')
+    order_by: str | None = Field(None, description='排序字段；前缀 "-" 表示降序。')
+    limit: int = Field(20, ge=1, le=100, description="明细返回条数，最大 100。")
+    time_range: LensTimeRangeArgs | None = Field(None, description="时间范围约束。")
+
+
 TOOL_ARG_MODELS: dict[str, type[BaseModel]] = {
     "probe_search_by_request_id": ProbeSearchByRequestIdArgs,
     "probe_search_logs": ProbeSearchLogsArgs,
@@ -58,6 +123,14 @@ TOOL_ARG_MODELS: dict[str, type[BaseModel]] = {
     "probe_tail_service_logs": ProbeTailServiceLogsArgs,
     "probe_list_services": ProbeListServicesArgs,
     "probe_context_around_match": ProbeContextAroundMatchArgs,
+    "probe_search_ops_logs": ProbeSearchOpsLogsArgs,
+    "meridian_diagnose_request": MeridianDiagnoseRequestArgs,
+    "atlas_list_services": AtlasListServicesArgs,
+    "atlas_search_meta": AtlasSearchMetaArgs,
+    "atlas_get_table": AtlasGetTableArgs,
+    "lens_list_entities": LensListEntitiesArgs,
+    "lens_describe_entity": LensDescribeEntityArgs,
+    "lens_query": LensQueryArgs,
 }
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
@@ -67,6 +140,14 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "probe_tail_service_logs": "按服务名查看最近日志，适合用户想直接查看某个服务的运行日志。",
     "probe_list_services": "列出当前 Probe 可观测到的服务。",
     "probe_context_around_match": "读取日志命中行上下文，适合进一步确认某条日志前后的调用细节。",
+    "probe_search_ops_logs": "通过 Probe ops 聚合接口跨多台业务主机搜索服务日志；当前默认禁用，启用后只允许白名单 host。",
+    "meridian_diagnose_request": "按 request_id 自动收集 Probe 链路、Atlas 元数据和 Lens 候选实体 count，返回一包可用于排障的结构化证据。",
+    "atlas_list_services": "通过 Atlas 列出业务服务元数据，用于回答当前有哪些服务、状态和部署/日志线索。",
+    "atlas_search_meta": "通过 Atlas 按关键词搜索元数据，用于查找相关服务、表、字段和语义标注。",
+    "atlas_get_table": "通过 Atlas 获取指定表详情，用于查看字段结构、注释、语义和近似行数。",
+    "lens_list_entities": "通过 Lens 列出可查询业务实体，用于决定后续业务数据查询入口。",
+    "lens_describe_entity": "通过 Lens 查看业务实体字段、语义和查询约束，查询前应先调用。",
+    "lens_query": "通过 Lens DSL 执行业务数据只读查询，支持 count 和明细；不要生成 SQL，DSL 仍由 Lens 后端校验。",
 }
 
 

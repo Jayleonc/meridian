@@ -10,6 +10,7 @@ from app.services.log_service import (
     get_services,
     search_by_request_id,
     search_logs,
+    search_ops_logs,
     tail_service_logs,
     tail_errors,
 )
@@ -86,6 +87,24 @@ async def search(body: dict):
         )
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail="日志搜索超时，请缩小时间范围或关键词后重试") from exc
+    return result.model_dump()
+
+
+@router.post("/ops/search")
+async def ops_search(body: dict):
+    """通过 ops 聚合接口跨 host 搜索日志。"""
+    try:
+        result = await search_ops_logs(
+            service=body["service"],
+            keyword=body["keyword"],
+            hours_back=body.get("hours_back", 1),
+            hosts=body.get("hosts", []),
+            limit=body.get("limit", 50),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=f"缺少必填参数: {exc.args[0]}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return result.model_dump()
 
 

@@ -527,8 +527,12 @@ export default function AtlasPage() {
                         inv.push({
                           type: "entity",
                           label: `查询 ${selectedTable.name}`,
-                          path: "/lens",
-                          data: { database: selectedTable.database, table: selectedTable.name },
+                          path: `/lens?entity=${encodeURIComponent(`${selectedTable.database}__${selectedTable.name}`)}&db=${encodeURIComponent(selectedTable.database)}&table=${encodeURIComponent(selectedTable.name)}&action=count`,
+                          data: {
+                            database: selectedTable.database,
+                            table: selectedTable.name,
+                            entity: `${selectedTable.database}__${selectedTable.name}`,
+                          },
                         })
                       }
                     >

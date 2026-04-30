@@ -84,6 +84,30 @@ async def search_logs(
     return _with_token_stats(json.dumps(result.model_dump(), ensure_ascii=False))
 
 
+@mcp.tool(name="search_ops_logs")
+async def search_ops_logs(
+    service: str,
+    keyword: str,
+    hosts: list[str],
+    hours_back: int = 1,
+    limit: int = 50,
+) -> str:
+    """通过 ops 聚合接口跨多台业务服务器搜索日志。
+
+    当前是 anlog.sh 生产适配前的预备接口。默认禁用；启用后仅允许配置白名单
+    host，并返回可表达 partial success 的结构化结果。
+
+    Args:
+        service: 服务名
+        keyword: 搜索关键词
+        hosts: 要查询的 host 列表，必须在 Probe ops 配置白名单内
+        hours_back: 往前查多少小时，默认1
+        limit: 最大返回条数，默认50，上限随 Probe limits.max_lines
+    """
+    result = await log_service.search_ops_logs(service, keyword, hours_back, hosts, limit)
+    return _with_token_stats(json.dumps(result.model_dump(), ensure_ascii=False))
+
+
 @mcp.tool(name="tail_errors")
 async def tail_errors(
     hours_back: int = 1,

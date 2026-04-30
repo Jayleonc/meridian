@@ -221,6 +221,22 @@ export interface TraceEntry {
   request_id?: string;
 }
 
+export interface TraceServiceStats {
+  total: number;
+  error: number;
+  warn: number;
+  first_seen: string;
+  last_seen: string;
+}
+
+export interface TraceSuspect {
+  service: string;
+  level: string;
+  timestamp: string;
+  message: string;
+  reason: string;
+}
+
 export interface TraceSummary {
   request_id: string;
   total_lines: number;
@@ -232,6 +248,8 @@ export interface TraceSummary {
   errors: TraceEntry[];
   warns: TraceEntry[];
   timeline: TraceEntry[];
+  service_stats?: Record<string, TraceServiceStats>;
+  suspects?: TraceSuspect[];
   hint: string;
   next_actions?: string[];
 }
@@ -466,6 +484,43 @@ export const chat = {
     request<ChatTurnResponse>(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",
       body: JSON.stringify({ content }),
+    }),
+};
+
+// ── Diagnosis ──
+
+export interface DiagnosisPack {
+  request_id: string;
+  terms?: string[];
+  trace?: Partial<TraceSummary>;
+  atlas_queries?: Array<{
+    query: string;
+    matched_service?: ServiceInfo[];
+    matched_table?: TableInfo[];
+    matched_column?: Array<Record<string, string>>;
+    error?: unknown;
+  }>;
+  lens_candidates?: Array<{
+    score: number;
+    summary: EntitySummary;
+    detail?: Partial<EntityDetail>;
+    count?: QueryResult;
+  }>;
+  next_actions?: string[];
+}
+
+export const diagnosis = {
+  request: (body: {
+    request_id: string;
+    back_hours?: number;
+    hint_time?: string;
+    include_full?: boolean;
+    include_lens_counts?: boolean;
+    max_entities?: number;
+  }) =>
+    request<DiagnosisPack>("/api/diagnosis/request", {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
 };
 

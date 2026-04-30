@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useApp } from "../../context/AppContext";
 import { useInvestigation } from "../../context/InvestigationContext";
 import { usePolling } from "../../hooks/usePolling";
-import { probe, type LogContext, type LogItem, type SearchResult, type TraceSummary } from "../../api/client";
+import { diagnosis, probe, type DiagnosisPack, type LogContext, type LogItem, type SearchResult, type TraceSummary } from "../../api/client";
 import { formatLogTime } from "../../utils/time";
 import { serviceSourceLabel } from "../../utils/serviceLabels";
 
@@ -260,6 +260,8 @@ export default function ProbePage() {
   const [traceHintTime, setTraceHintTime] = useState(traceHintParam);
   const [traceResult, setTraceResult] = useState<TraceSummary | null>(null);
   const [traceLoading, setTraceLoading] = useState(false);
+  const [diagnosisPack, setDiagnosisPack] = useState<DiagnosisPack | null>(null);
+  const [diagnosisLoading, setDiagnosisLoading] = useState(false);
 
   // Auto-trace if rid is in URL
   useEffect(() => {
@@ -285,6 +287,7 @@ export default function ProbePage() {
     const nextBackHours = options.backHours ?? backHours;
     const nextHintTime = options.hintTime ?? traceHintTime;
     setTraceLoading(true);
+    setDiagnosisPack(null);
     try {
       const r = await probe.trace(id, nextBackHours, nextHintTime || undefined);
       setTraceResult(r);
@@ -403,6 +406,24 @@ export default function ProbePage() {
   function analyzeTraceWithAgent(trace: TraceSummary) {
     const prompt = buildTraceAgentPrompt(trace);
     navigate(`/chat?prompt=${encodeURIComponent(prompt)}&auto_send=1`);
+  }
+
+  async function buildDiagnosisPack(trace: TraceSummary) {
+    setDiagnosisLoading(true);
+    try {
+      const pack = await diagnosis.request({
+        request_id: trace.request_id,
+        back_hours: trace.searched_hours,
+        hint_time: traceHintTime || undefined,
+        include_lens_counts: true,
+        max_entities: 3,
+      });
+      setDiagnosisPack(pack);
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "证据包生成失败");
+    } finally {
+      setDiagnosisLoading(false);
+    }
   }
 
   const filteredServices = services.filter((svc) =>
@@ -745,7 +766,15 @@ export default function ProbePage() {
               )}
             </div>
 
-            {traceResult && <TraceView trace={traceResult} onAnalyze={analyzeTraceWithAgent} />}
+            {traceResult && (
+              <TraceView
+                trace={traceResult}
+                diagnosisPack={diagnosisPack}
+                diagnosisLoading={diagnosisLoading}
+                onAnalyze={analyzeTraceWithAgent}
+                onBuildDiagnosis={buildDiagnosisPack}
+              />
+            )}
           </div>
         )}
 
@@ -781,6 +810,9 @@ function buildTraceAgentPrompt(trace: TraceSummary): string {
   const warns = trace.warns.slice(0, 3)
     .map((item) => `- ${formatLogTime(item.timestamp)} [${item.service}] ${clipTraceMessage(item.message)}`)
     .join("\n") || "- 无警告日志摘要";
+  const suspects = (trace.suspects ?? []).slice(0, 5)
+    .map((item) => `- ${formatLogTime(item.timestamp)} [${item.level}] [${item.service}] ${clipTraceMessage(item.message)}；原因：${item.reason}`)
+    .join("\n") || "- 暂无候选异常点";
 
   return [
     "请对这个请求链路做一次排障分析。",
@@ -797,12 +829,74 @@ function buildTraceAgentPrompt(trace: TraceSummary): string {
     "警告摘要:",
     warns,
     "",
+    "候选异常点:",
+    suspects,
+    "",
     "要求:",
-    "1. 先用 probe_search_by_request_id 重新拉取证据，include_full=true。",
-    "2. 输出关键证据列表，按服务和时间排序。",
-    "3. 给出最可能的候选原因，但不要下最终结论。",
-    "4. 给出下一步应该查哪个服务、关键词或业务数据。",
+    "1. 先调用 meridian_diagnose_request，include_lens_counts=true，自动收集 Probe/Atlas/Lens 证据。",
+    "2. 如果证据包不足，再用 probe_search_by_request_id(include_full=true) 或 Atlas/Lens 低层工具补证据。",
+    "3. 输出关键证据列表，按服务和时间排序。",
+    "4. 给出最可能的候选原因，但不要下最终结论。",
+    "5. 给出下一步应该查哪个服务、关键词或业务数据。",
   ].join("\n");
+}
+
+function DiagnosisPackView({ pack }: { pack: DiagnosisPack }) {
+  const atlasQueries = pack.atlas_queries ?? [];
+  const lensCandidates = pack.lens_candidates ?? [];
+  const suspectCount = pack.trace?.suspects?.length ?? 0;
+
+  return (
+    <div className="card mb-md" style={{ borderLeftColor: "var(--teal)", borderLeftWidth: 3 }}>
+      <div className="card-head">
+        <h3>诊断证据包</h3>
+        <div className="row gap-sm wrap">
+          <span className="badge badge-teal">{atlasQueries.length} 个 Atlas 查询</span>
+          <span className="badge badge-emerald">{lensCandidates.length} 个 Lens 候选</span>
+          <span className="badge badge-coral">{suspectCount} 个异常点</span>
+        </div>
+      </div>
+      <div className="card-body" style={{ display: "grid", gap: 12 }}>
+        {atlasQueries.length > 0 && (
+          <div>
+            <div className="field-label mb-sm">Atlas 命中</div>
+            <div className="row gap-xs wrap">
+              {atlasQueries.map((query, index) => (
+                <span key={`${query.query}-${index}`} className="badge badge-dim">
+                  {query.query}: {query.matched_service?.length ?? 0} 服务 / {query.matched_table?.length ?? 0} 表 / {query.matched_column?.length ?? 0} 字段
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {lensCandidates.length > 0 ? (
+          <div>
+            <div className="field-label mb-sm">Lens 候选实体</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {lensCandidates.map((candidate, index) => (
+                <div key={`${candidate.summary?.name ?? index}`} className="row gap-xs wrap">
+                  <span className="badge badge-teal">{candidate.summary?.display_name || candidate.summary?.name}</span>
+                  <span className="badge badge-dim">score {candidate.score}</span>
+                  {candidate.count && (
+                    <span className="badge badge-emerald">
+                      count {Number(candidate.count.count ?? 0).toLocaleString()}
+                    </span>
+                  )}
+                  {candidate.detail?.primary_table && (
+                    <span className="badge badge-dim">{candidate.detail.database}.{candidate.detail.primary_table}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="empty" style={{ padding: 10 }}>
+            <div className="empty-text">没有匹配到 Lens 业务实体；可以让 Agent 根据异常服务或关键词继续查 Atlas。</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /* ════════════════════════════════════════════
@@ -927,10 +1021,16 @@ function LogContextPanel({
 
 function TraceView({
   trace,
+  diagnosisPack,
+  diagnosisLoading,
   onAnalyze,
+  onBuildDiagnosis,
 }: {
   trace: TraceSummary;
+  diagnosisPack: DiagnosisPack | null;
+  diagnosisLoading: boolean;
   onAnalyze: (trace: TraceSummary) => void;
+  onBuildDiagnosis: (trace: TraceSummary) => void;
 }) {
   return (
     <div className="fade-up">
@@ -970,6 +1070,9 @@ function TraceView({
             <button className="btn btn-primary btn-sm" type="button" onClick={() => onAnalyze(trace)}>
               交给 Agent 分析
             </button>
+            <button className="btn btn-ghost btn-sm" type="button" onClick={() => onBuildDiagnosis(trace)} disabled={diagnosisLoading}>
+              {diagnosisLoading ? <><span className="spinner" /> 生成中</> : "生成证据包"}
+            </button>
             <span className="badge badge-dim">
               {trace.searched_hours > 0 ? `已回看 ${trace.searched_hours} 小时` : "当前小时"}
             </span>
@@ -992,11 +1095,70 @@ function TraceView({
         </div>
       </div>
 
+      {diagnosisPack && <DiagnosisPackView pack={diagnosisPack} />}
+
+      {Object.keys(trace.service_stats ?? {}).length > 0 && (
+        <div className="card mb-md">
+          <div className="card-head">
+            <h3>服务统计</h3>
+          </div>
+          <div className="card-body flush" style={{ overflowX: "auto" }}>
+            <table className="dtable">
+              <thead>
+                <tr>
+                  <th>服务</th>
+                  <th>日志</th>
+                  <th>错误</th>
+                  <th>警告</th>
+                  <th>首次出现</th>
+                  <th>最后出现</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(trace.service_stats ?? {}).map(([service, stat]) => (
+                  <tr key={service}>
+                    <td className="mono">{service}</td>
+                    <td>{stat.total}</td>
+                    <td><span className={stat.error > 0 ? "badge badge-coral" : "badge badge-dim"}>{stat.error}</span></td>
+                    <td><span className={stat.warn > 0 ? "badge badge-warn" : "badge badge-dim"}>{stat.warn}</span></td>
+                    <td className="mono">{formatLogTime(stat.first_seen)}</td>
+                    <td className="mono">{formatLogTime(stat.last_seen)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Hint */}
       {trace.hint && (
         <div className="card mb-md" style={{ borderLeftColor: "var(--warn)", borderLeftWidth: 3 }}>
           <div className="card-body" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--warn)", lineHeight: 1.6 }}>
             {trace.hint}
+          </div>
+        </div>
+      )}
+
+      {/* Suspects */}
+      {(trace.suspects ?? []).length > 0 && (
+        <div className="card mb-md" style={{ borderLeftColor: "var(--coral)", borderLeftWidth: 3 }}>
+          <div className="card-head">
+            <h3 style={{ color: "var(--coral)" }}>候选异常点</h3>
+            <span className="badge badge-coral">{trace.suspects?.length ?? 0}</span>
+          </div>
+          <div className="card-body flush" style={{ maxHeight: 260, overflowY: "auto" }}>
+            {(trace.suspects ?? []).map((item, i) => (
+              <div key={`${item.service}-${item.timestamp}-${i}`} className="log-line">
+                <span className="log-ts">{formatLogTime(item.timestamp)}</span>
+                <span className={`log-level ${item.level}`}>{item.level}</span>
+                <span className="log-svc">[{item.service}]</span>
+                <span className="log-msg">
+                  {item.message}
+                  <span style={{ color: "var(--t4)", marginLeft: 8 }}>{item.reason}</span>
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}

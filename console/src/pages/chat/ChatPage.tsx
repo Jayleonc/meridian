@@ -32,6 +32,26 @@ function formatValue(value: unknown): string {
   }
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function asList(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(asRecord(item)))
+    : [];
+}
+
+function textOf(value: unknown): string {
+  return typeof value === "string" ? value : value == null ? "" : String(value);
+}
+
+function numberOf(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function timeOf(ts: number): string {
   return new Date(ts * 1000).toLocaleTimeString("zh-CN", {
     hour12: false,
@@ -518,6 +538,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 }
 
 function ToolCall({ tool }: { tool: ChatToolCall }) {
+  const diagnosisResult = tool.name === "meridian_diagnose_request"
+    ? asRecord(tool.result)
+    : null;
+
   return (
     <details className={`chat-tool ${tool.error ? "error" : ""}`}>
       <summary>
@@ -531,9 +555,93 @@ function ToolCall({ tool }: { tool: ChatToolCall }) {
         </div>
         <div>
           <div className="chat-tool-label">结果</div>
-          <pre>{formatValue(tool.result)}</pre>
+          {diagnosisResult ? (
+            <DiagnosisToolResult result={diagnosisResult} />
+          ) : (
+            <pre>{formatValue(tool.result)}</pre>
+          )}
         </div>
       </div>
     </details>
+  );
+}
+
+function DiagnosisToolResult({ result }: { result: Record<string, unknown> }) {
+  const trace = asRecord(result.trace) ?? {};
+  const services = Array.isArray(trace.services) ? trace.services.map(textOf).filter(Boolean) : [];
+  const suspects = asList(trace.suspects).slice(0, 5);
+  const atlasQueries = asList(result.atlas_queries).slice(0, 4);
+  const lensCandidates = asList(result.lens_candidates).slice(0, 4);
+
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div className="row gap-sm wrap">
+        <span className="badge badge-dim">request {textOf(result.request_id || trace.request_id).slice(0, 18)}</span>
+        <span className="badge badge-teal">{numberOf(trace.total_lines)} 行日志</span>
+        <span className="badge badge-coral">{numberOf(trace.error_count)} 错误</span>
+        <span className="badge badge-warn">{numberOf(trace.warn_count)} 警告</span>
+      </div>
+
+      {services.length > 0 && (
+        <div>
+          <div className="chat-tool-label">服务路径</div>
+          <div className="row gap-xs wrap">
+            {services.map((service) => <span key={service} className="badge badge-teal">{service}</span>)}
+          </div>
+        </div>
+      )}
+
+      {suspects.length > 0 && (
+        <div>
+          <div className="chat-tool-label">候选异常点</div>
+          <div style={{ display: "grid", gap: 6 }}>
+            {suspects.map((item, index) => (
+              <div key={index} style={{ fontSize: 12, lineHeight: 1.5 }}>
+                <span className="badge badge-coral">{textOf(item.level)}</span>{" "}
+                <span className="mono">{textOf(item.service)}</span>{" "}
+                <span style={{ color: "var(--t3)" }}>{textOf(item.message)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {atlasQueries.length > 0 && (
+        <div>
+          <div className="chat-tool-label">Atlas 命中</div>
+          <div className="row gap-xs wrap">
+            {atlasQueries.map((query, index) => {
+              const tableCount = asList(query.matched_table).length;
+              const serviceCount = asList(query.matched_service).length;
+              const columnCount = asList(query.matched_column).length;
+              return (
+                <span key={index} className="badge badge-dim">
+                  {textOf(query.query)}: {serviceCount} 服务 / {tableCount} 表 / {columnCount} 字段
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {lensCandidates.length > 0 && (
+        <div>
+          <div className="chat-tool-label">Lens 候选实体</div>
+          <div style={{ display: "grid", gap: 6 }}>
+            {lensCandidates.map((candidate, index) => {
+              const summary = asRecord(candidate.summary) ?? {};
+              const count = asRecord(candidate.count);
+              return (
+                <div key={index} className="row gap-xs wrap" style={{ fontSize: 12 }}>
+                  <span className="badge badge-teal">{textOf(summary.display_name) || textOf(summary.name)}</span>
+                  <span className="badge badge-dim">score {numberOf(candidate.score)}</span>
+                  {count && <span className="badge badge-emerald">count {numberOf(count.count).toLocaleString()}</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

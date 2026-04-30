@@ -9,9 +9,18 @@ import re
 import sys
 from datetime import datetime, timedelta
 
-from app.adapters import file_adapter, glog_adapter
+from app.adapters import file_adapter, glog_adapter, ops_adapter
 from app.core.config import settings
-from app.schemas.probe import LogItem, SearchResult, TraceItem, TraceSummary
+from app.schemas.probe import (
+    LogItem,
+    OpsHostFailure,
+    OpsSearchResult,
+    SearchResult,
+    TraceItem,
+    TraceServiceStats,
+    TraceSummary,
+    TraceSuspect,
+)
 from app.utils.log_parser import parse_log_line, _clean_ansi, _truncate, _strip_rpc_body
 from app.utils.redact import redact_text
 
@@ -106,11 +115,81 @@ def _grep_results_to_items(
     return items
 
 
+def _ops_lines_to_items(
+    host: str,
+    lines: list[str],
+    *,
+    default_service: str,
+) -> list[LogItem]:
+    """将 ops adapter 单 host 输出转为 LogItem。"""
+    items: list[LogItem] = []
+    for line in lines:
+        parsed = parse_log_line(line, max_message_length=0)
+        if parsed:
+            items.append(LogItem(
+                timestamp=parsed["timestamp"],
+                level=parsed["level"],
+                service=parsed["process"] or default_service,
+                host=host,
+                request_id=parsed["request_id"],
+                source=parsed["source"],
+                text=_maybe_redact(parsed["message"]),
+                file="",
+                line_number=0,
+            ))
+        else:
+            items.append(LogItem(
+                timestamp="",
+                level="",
+                service=default_service,
+                host=host,
+                text=_maybe_redact(_truncate(line.strip())),
+                file="",
+                line_number=0,
+            ))
+    return items
+
+
 def _items_time_range(items: list[LogItem]) -> dict[str, str]:
     timestamps = [item.timestamp for item in items if item.timestamp]
     if not timestamps:
         return {"start": "", "end": ""}
     return {"start": timestamps[0], "end": timestamps[-1]}
+
+
+def _ops_unavailable_result(
+    *,
+    service: str,
+    keyword: str,
+    hours_back: int,
+    hosts: list[str],
+    limit: int,
+) -> OpsSearchResult:
+    query = {
+        "service": service,
+        "keyword": keyword,
+        "hours_back": hours_back,
+        "hosts": hosts,
+        "limit": limit,
+    }
+    return OpsSearchResult(
+        query=query,
+        summary={
+            "status": "unavailable",
+            "available": False,
+            "reason": "ops 聚合模式未启用",
+            "total_matches": 0,
+            "returned": 0,
+            "searched_hosts": hosts,
+            "successful_hosts": [],
+            "matched_hosts": [],
+            "failed_hosts": [],
+            "partial": False,
+            "truncated": False,
+        },
+        items=[],
+        next_actions=["enable_probe_ops_aggregation"],
+    )
 
 
 def _tail_summary(items: list[LogItem], limit: int, truncated: bool, files: list) -> dict:
@@ -260,6 +339,50 @@ def _parsed_to_trace_item(parsed: dict, compact_max: int = 0) -> TraceItem:
     )
 
 
+def _update_service_stats(stats: dict[str, TraceServiceStats], parsed: dict) -> None:
+    service = parsed["process"]
+    timestamp = parsed["timestamp"]
+    current = stats.setdefault(
+        service,
+        TraceServiceStats(total=0, error=0, warn=0, first_seen=timestamp, last_seen=timestamp),
+    )
+    current.total += 1
+    current.last_seen = timestamp
+    if parsed["level"] in ("ERR", "IMP"):
+        current.error += 1
+    elif parsed["level"] == "WAR":
+        current.warn += 1
+
+
+def _suspect_reason(level: str) -> str:
+    if level == "IMP":
+        return "IMP 日志通常表示最终失败或高优先级异常，优先核对该服务的处置结果。"
+    if level == "ERR":
+        return "ERR 日志表示失败分支，优先检查该服务在该时间点的错误上下文。"
+    return "WAR 日志可能是异常前兆或降级信号，结合前后文确认是否影响请求。"
+
+
+def _suspect_rank(level: str) -> int:
+    if level == "IMP":
+        return 0
+    if level == "ERR":
+        return 1
+    if level == "WAR":
+        return 2
+    return 3
+
+
+def _trace_next_actions() -> list[str]:
+    return [
+        "search_logs",
+        "context_around_match",
+        "search_by_request_id_include_full",
+        "tail_service_logs_for_suspect_services",
+        "atlas_check_suspect_service_metadata",
+        "lens_query_related_business_context",
+    ]
+
+
 def _calc_back_hours(hint_time: str) -> int:
     """
     根据用户提供的时间字符串计算 back_hours。
@@ -349,15 +472,18 @@ async def search_by_request_id(
         errors: list[TraceItem] = []
         warns: list[TraceItem] = []
         timeline: list[TraceItem] = []
+        service_stats: dict[str, TraceServiceStats] = {}
+        suspect_candidates: list[tuple[int, int, TraceSuspect]] = []
         services_seen: list[str] = []  # 保持顺序的去重列表
         timestamps: list[str] = []     # 收集所有时间戳，用于计算时间范围
 
-        for line in lines:
+        for index, line in enumerate(lines):
             parsed = parse_log_line(line)
             if not parsed:
                 continue
 
             timestamps.append(parsed["timestamp"])
+            _update_service_stats(service_stats, parsed)
 
             # 记录服务出现顺序
             svc = parsed["process"]
@@ -366,12 +492,41 @@ async def search_by_request_id(
 
             if parsed["level"] in ("ERR", "IMP"):
                 # IMP = Important，比 ERR 更严重（如 final fail / message drop）
-                errors.append(_parsed_to_trace_item(parsed, compact_max=300))
+                trace_item = _parsed_to_trace_item(parsed, compact_max=300)
+                errors.append(trace_item)
+                suspect_candidates.append((
+                    _suspect_rank(parsed["level"]),
+                    index,
+                    TraceSuspect(
+                        service=trace_item.service,
+                        level=trace_item.level,
+                        timestamp=trace_item.timestamp,
+                        message=trace_item.message,
+                        reason=_suspect_reason(trace_item.level),
+                    ),
+                ))
             elif parsed["level"] == "WAR":
-                warns.append(_parsed_to_trace_item(parsed, compact_max=300))
+                trace_item = _parsed_to_trace_item(parsed, compact_max=300)
+                warns.append(trace_item)
+                suspect_candidates.append((
+                    _suspect_rank(parsed["level"]),
+                    index,
+                    TraceSuspect(
+                        service=trace_item.service,
+                        level=trace_item.level,
+                        timestamp=trace_item.timestamp,
+                        message=trace_item.message,
+                        reason=_suspect_reason(trace_item.level),
+                    ),
+                ))
             else:
                 # timeline：去掉 req/rsp body，截断到 150 字符
                 timeline.append(_parsed_to_trace_item(parsed, compact_max=150))
+
+        suspects = [
+            candidate
+            for _, _, candidate in sorted(suspect_candidates, key=lambda item: (item[0], item[1]))
+        ]
 
         # 计算时间范围
         if timestamps:
@@ -411,9 +566,11 @@ async def search_by_request_id(
             errors=errors,
             warns=warns,
             timeline=timeline,
+            service_stats=service_stats,
+            suspects=suspects,
             raw_lines=raw_lines,
             hint=hint,
-            next_actions=["search_logs", "context_around_match", "search_by_request_id_include_full"],
+            next_actions=_trace_next_actions(),
         )
     except TimeoutError as e:
         detail = str(e) or "日志搜索超时"
@@ -549,6 +706,92 @@ def _timeout_trace_summary(request_id: str, back_hours: int, detail: str) -> Tra
         ),
         next_actions=["search_by_request_id_with_hint_time", "search_logs_narrower_range"],
     )
+
+
+async def search_ops_logs(
+    service: str,
+    keyword: str,
+    hours_back: int = 1,
+    hosts: list[str] | None = None,
+    limit: int = 50,
+) -> OpsSearchResult:
+    """通过 ops 聚合接口跨 host 搜索日志。
+
+    这是 anlog.sh 生产接入前的稳定 service 边界：默认禁用；启用后只允许
+    白名单 host 和结构化参数，并由 adapter 用非 shell 子进程调用命令。
+    """
+    hosts = hosts or []
+    params = {
+        "service": service,
+        "keyword": keyword,
+        "hours_back": hours_back,
+        "hosts": hosts,
+        "limit": limit,
+    }
+
+    if not settings.ops.enabled:
+        result = _ops_unavailable_result(
+            service=service,
+            keyword=keyword,
+            hours_back=hours_back,
+            hosts=hosts,
+            limit=limit,
+        )
+        _audit("search_ops_logs", params, 0, False, "ops aggregation disabled")
+        return result
+
+    try:
+        outputs = await ops_adapter.search_ops_logs(
+            service=service,
+            keyword=keyword,
+            hours_back=hours_back,
+            hosts=hosts,
+            limit=limit,
+        )
+        items: list[LogItem] = []
+        failed_hosts: list[OpsHostFailure] = []
+        successful_hosts: list[str] = []
+
+        for output in outputs:
+            if output.ok:
+                successful_hosts.append(output.host)
+                lines = [line for line in output.stdout.splitlines() if line.strip()]
+                items.extend(_ops_lines_to_items(output.host, lines, default_service=service))
+            else:
+                failed_hosts.append(OpsHostFailure(host=output.host, reason=output.error))
+
+        total = len(items)
+        truncated = total > limit
+        returned_items = items[:limit]
+        matched_hosts = sorted({item.host for item in returned_items if item.host})
+        partial = bool(failed_hosts and successful_hosts)
+        status = "partial" if partial else "ok"
+        if failed_hosts and not successful_hosts:
+            status = "failed"
+
+        summary_failed_hosts = [failure.model_dump() for failure in failed_hosts]
+        _audit("search_ops_logs", params, len(returned_items), truncated, "" if not failed_hosts else "partial_failure")
+        return OpsSearchResult(
+            query=params,
+            summary={
+                "status": status,
+                "available": True,
+                "total_matches": total,
+                "returned": len(returned_items),
+                "searched_hosts": [output.host for output in outputs],
+                "successful_hosts": successful_hosts,
+                "matched_hosts": matched_hosts,
+                "failed_hosts": summary_failed_hosts,
+                "partial": partial,
+                "truncated": truncated,
+            },
+            items=returned_items,
+            failed_hosts=failed_hosts,
+            next_actions=["context_around_match", "search_by_request_id"],
+        )
+    except Exception as e:
+        _audit("search_ops_logs", params, 0, False, str(e))
+        raise
 
 
 async def search_logs(

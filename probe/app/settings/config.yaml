@@ -22,3 +22,10 @@ paths:
   hourly_log_dir: /data/brick/log
   supervisor_log_dir: /var/log/supervisor
   glog_path: /data/pinfire/tools/glog.sh
+
+ops:
+  enabled: false
+  command_path: /data/pinfire/tools/anlog.sh
+  timeout_seconds: 10
+  allowed_hosts: []
+  max_hosts: 5

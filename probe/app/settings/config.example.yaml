@@ -15,6 +15,13 @@ security:
 time:
   log_timezone: Asia/Shanghai
 
+ops:
+  enabled: false
+  command_path: /data/pinfire/tools/anlog.sh
+  timeout_seconds: 10
+  allowed_hosts: []
+  max_hosts: 5
+
 services:
   gateway:
     log_paths:

@@ -1,12 +1,13 @@
 """Nexus — MCP 网关.
 
-当前 MVP 目标：让 Agent 只连接 Nexus，就能调用已可用的 Probe 能力。
-Nexus 自己作为 MCP Server 暴露 `probe.*` 工具，内部通过 Probe 的 HTTP API 转发。
+当前 MVP 目标：让 Agent 只连接 Nexus，就能调用已可用的 Probe、Atlas、Lens 能力。
+Nexus 自己作为 MCP Server 暴露受控工具，内部通过下游服务 HTTP API 转发。
 """
 
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -14,14 +15,16 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
+from pydantic import ValidationError
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.responses import FileResponse, Response
 
 from src.agent import create_chat_router
+from src.agent.tools import validate_tool_args
 from src.agent.sessions import HybridSessionStore
 from src import devops
 
@@ -61,7 +64,11 @@ _registry: dict[str, dict[str, Any]] = {
             "messages": "/mcp/messages/",
             "stream": "/mcp/stream/",
         },
-        "tools": [],
+        "tools": [
+            "atlas.list_services",
+            "atlas.search_meta",
+            "atlas.get_table",
+        ],
     },
     "probe": {
         "name": "probe",
@@ -81,6 +88,7 @@ _registry: dict[str, dict[str, Any]] = {
             "probe.tail_service_logs",
             "probe.list_services",
             "probe.context_around_match",
+            "probe.search_ops_logs",
         ],
     },
     "lens": {
@@ -94,7 +102,11 @@ _registry: dict[str, dict[str, Any]] = {
             "messages": "/mcp/messages/",
             "stream": "/mcp/stream/",
         },
-        "tools": [],
+        "tools": [
+            "lens.list_entities",
+            "lens.describe_entity",
+            "lens.query",
+        ],
     },
     "trace": {
         "name": "trace",
@@ -154,6 +166,10 @@ def _nexus_info() -> dict[str, Any]:
         "health": "/health",
         "registry": "/registry",
         "chat": "/api/chat",
+        "diagnosis": {
+            "request": "/api/diagnosis/request",
+            "tools": ["meridian.diagnose_request"],
+        },
         "console": "/",
         "devops": {
             "enabled": devops.is_enabled(),
@@ -210,6 +226,14 @@ async def _probe(method: str, path: str, **kwargs: Any) -> Any:
     return await _request_service("probe", method, path, **kwargs)
 
 
+async def _atlas(method: str, path: str, **kwargs: Any) -> Any:
+    return await _request_service("atlas", method, path, **kwargs)
+
+
+async def _lens(method: str, path: str, **kwargs: Any) -> Any:
+    return await _request_service("lens", method, path, **kwargs)
+
+
 async def _downstream_health() -> dict[str, Any]:
     services: dict[str, dict[str, Any]] = {}
     for name, svc in _registry.items():
@@ -244,6 +268,254 @@ def _devops_disabled() -> dict[str, Any]:
 
 def _clean_params(params: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in params.items() if value is not None}
+
+
+def _service_matches_query(service: dict[str, Any], query: str) -> bool:
+    text = json.dumps(service, ensure_ascii=False, default=str).lower()
+    return query.lower() in text
+
+
+_DIAGNOSIS_STOPWORDS = {
+    "ctx",
+    "err",
+    "error",
+    "fail",
+    "failed",
+    "false",
+    "from",
+    "http",
+    "https",
+    "info",
+    "message",
+    "nil",
+    "path",
+    "req",
+    "request",
+    "response",
+    "rsp",
+    "service",
+    "timeout",
+    "true",
+    "warn",
+}
+
+
+async def _atlas_search_metadata(query: str) -> dict[str, Any]:
+    metadata = await _atlas(
+        "GET",
+        "/api/schemas/search/meta",
+        params={"q": query},
+    )
+    result = dict(metadata) if isinstance(metadata, dict) else {"metadata": metadata}
+
+    services = await _atlas("GET", "/api/services")
+    if isinstance(services, dict) and services.get("error"):
+        result["matched_service"] = []
+        result["service_search_error"] = services
+        return result
+
+    service_items = services.get("service", []) if isinstance(services, dict) else []
+    result["matched_service"] = [
+        service
+        for service in service_items
+        if isinstance(service, dict) and _service_matches_query(service, query)
+    ][:20]
+    return result
+
+
+def _compact_list(value: Any, limit: int) -> list[Any]:
+    return value[:limit] if isinstance(value, list) else []
+
+
+def _diagnosis_terms(trace: dict[str, Any], max_terms: int = 8) -> list[str]:
+    terms: list[str] = []
+
+    for service in _compact_list(trace.get("services"), 12):
+        _append_diagnosis_term(terms, service)
+    for suspect in _compact_list(trace.get("suspects"), 8):
+        if isinstance(suspect, dict):
+            _append_diagnosis_term(terms, suspect.get("service"))
+            for token in re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", str(suspect.get("message", ""))):
+                _append_diagnosis_term(terms, token)
+    for item in _compact_list(trace.get("errors"), 4) + _compact_list(trace.get("warns"), 2):
+        if isinstance(item, dict):
+            _append_diagnosis_term(terms, item.get("service"))
+            for token in re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", str(item.get("message", ""))):
+                _append_diagnosis_term(terms, token)
+
+    return terms[:max_terms]
+
+
+def _append_diagnosis_term(terms: list[str], value: Any) -> None:
+    text = str(value or "").strip()
+    if not text:
+        return
+    candidates = [text, *re.split(r"[^a-zA-Z0-9_]+", text)]
+    for candidate in candidates:
+        normalized = candidate.strip("_").lower()
+        if len(normalized) < 3 or normalized in _DIAGNOSIS_STOPWORDS:
+            continue
+        if normalized not in terms:
+            terms.append(normalized)
+
+
+def _summarize_trace(trace: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "request_id": trace.get("request_id"),
+        "total_lines": trace.get("total_lines", 0),
+        "time_range": trace.get("time_range", ""),
+        "searched_hours": trace.get("searched_hours", 0),
+        "services": _compact_list(trace.get("services"), 20),
+        "error_count": trace.get("error_count", 0),
+        "warn_count": trace.get("warn_count", 0),
+        "service_stats": trace.get("service_stats", {}),
+        "suspects": _compact_list(trace.get("suspects"), 8),
+        "errors": _compact_list(trace.get("errors"), 8),
+        "warns": _compact_list(trace.get("warns"), 5),
+        "hint": trace.get("hint", ""),
+        "next_actions": trace.get("next_actions", []),
+    }
+
+
+def _entity_score(entity: dict[str, Any], terms: list[str]) -> int:
+    text = " ".join(
+        str(entity.get(key, ""))
+        for key in ("name", "display_name", "database", "db_type")
+    ).lower()
+    return sum(3 if term in text else 0 for term in terms)
+
+
+def _summarize_entity_detail(detail: Any) -> dict[str, Any]:
+    if not isinstance(detail, dict):
+        return {"error": "invalid_entity_detail", "detail": detail}
+    fields = detail.get("fields") if isinstance(detail.get("fields"), dict) else {}
+    field_items = []
+    for name, field in list(fields.items())[:20]:
+        if not isinstance(field, dict):
+            continue
+        field_items.append(
+            {
+                "name": name,
+                "type": field.get("type", ""),
+                "semantic": field.get("semantic", ""),
+                "filterable": field.get("filterable", False),
+                "sortable": field.get("sortable", False),
+                "sensitive": field.get("sensitive", False),
+            }
+        )
+    return {
+        "name": detail.get("name", ""),
+        "display_name": detail.get("display_name", ""),
+        "database": detail.get("database", ""),
+        "primary_table": detail.get("primary_table", ""),
+        "source_table": detail.get("source_table", []),
+        "constraint": detail.get("constraint", {}),
+        "fields": field_items,
+    }
+
+
+async def _diagnose_request(args: dict[str, Any]) -> dict[str, Any]:
+    request_id = str(args["request_id"])
+    back_hours = int(args.get("back_hours", 0))
+    trace = await _probe(
+        "GET",
+        f"/api/logs/trace/{quote(request_id, safe='')}",
+        params=_clean_params(
+            {
+                "back_hours": back_hours,
+                "hint_time": args.get("hint_time"),
+                "include_full": args.get("include_full", False),
+            }
+        ),
+    )
+    if not isinstance(trace, dict) or trace.get("error"):
+        return {
+            "request_id": request_id,
+            "trace": trace,
+            "atlas_queries": [],
+            "lens_candidates": [],
+            "next_actions": ["check_probe_trace_error", "search_logs_by_request_id_keyword"],
+        }
+
+    terms = _diagnosis_terms(trace)
+    atlas_queries: list[dict[str, Any]] = []
+    lens_terms = list(terms)
+    for term in terms[:6]:
+        meta = await _atlas_search_metadata(term)
+        matched_service = _compact_list(meta.get("matched_service"), 8)
+        matched_table = _compact_list(meta.get("matched_table"), 8)
+        matched_column = _compact_list(meta.get("matched_column"), 12)
+        for table in matched_table:
+            if isinstance(table, dict):
+                _append_diagnosis_term(lens_terms, table.get("database"))
+                _append_diagnosis_term(lens_terms, table.get("name"))
+        for column in matched_column:
+            if isinstance(column, dict):
+                _append_diagnosis_term(lens_terms, column.get("database"))
+                _append_diagnosis_term(lens_terms, column.get("table"))
+                _append_diagnosis_term(lens_terms, column.get("column"))
+        for service in matched_service:
+            if isinstance(service, dict):
+                databases = service.get("database_list") or service.get("databases") or []
+                if isinstance(databases, str):
+                    databases = [databases]
+                for database in databases:
+                    _append_diagnosis_term(lens_terms, database)
+        atlas_queries.append(
+            {
+                "query": term,
+                "matched_service": matched_service,
+                "matched_table": matched_table,
+                "matched_column": matched_column,
+                "error": meta.get("error") or meta.get("service_search_error"),
+            }
+        )
+
+    lens_candidates: list[dict[str, Any]] = []
+    max_entities = int(args.get("max_entities", 3))
+    entities_result = await _lens("GET", "/api/entities")
+    entities = entities_result.get("entity", []) if isinstance(entities_result, dict) else []
+    ranked = sorted(
+        (
+            (_entity_score(entity, lens_terms), entity)
+            for entity in entities
+            if isinstance(entity, dict) and _entity_score(entity, lens_terms) > 0
+        ),
+        key=lambda item: item[0],
+        reverse=True,
+    )
+    for score, entity in ranked[:max_entities]:
+        name = str(entity.get("name", ""))
+        if not name:
+            continue
+        detail = await _lens("GET", f"/api/entities/{quote(name, safe='')}")
+        candidate: dict[str, Any] = {
+            "score": score,
+            "summary": entity,
+            "detail": _summarize_entity_detail(detail),
+        }
+        if args.get("include_lens_counts", True):
+            candidate["count"] = await _lens(
+                "POST",
+                "/api/entities/query",
+                json_body={"entity": name, "aggregate": "count", "limit": 1},
+            )
+        lens_candidates.append(candidate)
+
+    return {
+        "request_id": request_id,
+        "terms": terms,
+        "lens_terms": lens_terms[:16],
+        "trace": _summarize_trace(trace),
+        "atlas_queries": atlas_queries,
+        "lens_candidates": lens_candidates,
+        "next_actions": [
+            "read_suspect_service_context",
+            "verify_atlas_metadata_matches",
+            "count_or_sample_high_score_lens_entities",
+            "ask_human_to_confirm_business_object_if_no_lens_candidate",
+        ],
+    }
 
 
 async def _call_chat_tool(name: str, args: dict[str, Any]) -> Any:
@@ -320,6 +592,50 @@ async def _call_chat_tool(name: str, args: dict[str, Any]) -> Any:
             },
         )
 
+    if name == "probe_search_ops_logs":
+        return await _probe(
+            "POST",
+            "/api/logs/ops/search",
+            json_body={
+                "service": args["service"],
+                "keyword": args["keyword"],
+                "hosts": args["hosts"],
+                "hours_back": args.get("hours_back", 1),
+                "limit": args.get("limit", 50),
+            },
+        )
+
+    if name == "meridian_diagnose_request":
+        return await _diagnose_request(args)
+
+    if name == "atlas_list_services":
+        return await _atlas("GET", "/api/services")
+
+    if name == "atlas_search_meta":
+        return await _atlas_search_metadata(str(args["query"]))
+
+    if name == "atlas_get_table":
+        database = str(args["database"])
+        table = str(args["table"])
+        return await _atlas(
+            "GET",
+            f"/api/schemas/{quote(database, safe='')}/tables/{quote(table, safe='')}",
+        )
+
+    if name == "lens_list_entities":
+        return await _lens("GET", "/api/entities")
+
+    if name == "lens_describe_entity":
+        entity = str(args["entity"])
+        return await _lens("GET", f"/api/entities/{quote(entity, safe='')}")
+
+    if name == "lens_query":
+        return await _lens(
+            "POST",
+            "/api/entities/query",
+            json_body=args,
+        )
+
     return {"error": "unknown_tool", "tool": name}
 
 
@@ -390,6 +706,29 @@ async def _proxy_request(
         status_code=resp.status_code,
         headers=_forward_headers(resp.headers),
     )
+
+
+@mcp.tool(name="meridian.diagnose_request")
+async def meridian_diagnose_request(
+    request_id: str,
+    back_hours: int = 0,
+    hint_time: str | None = None,
+    include_full: bool = False,
+    include_lens_counts: bool = True,
+    max_entities: int = 3,
+) -> str:
+    """按 request_id 生成结构化诊断证据包：Probe 链路、Atlas 元数据、Lens 候选实体。"""
+    data = await _diagnose_request(
+        {
+            "request_id": request_id,
+            "back_hours": back_hours,
+            "hint_time": hint_time,
+            "include_full": include_full,
+            "include_lens_counts": include_lens_counts,
+            "max_entities": max_entities,
+        }
+    )
+    return _json(data)
 
 
 @mcp.tool(name="probe.search_by_request_id")
@@ -499,6 +838,29 @@ async def probe_context_around_match(
             "line_number": line_number,
             "before": before,
             "after": after,
+        },
+    )
+    return _json(data)
+
+
+@mcp.tool(name="probe.search_ops_logs")
+async def probe_search_ops_logs(
+    service: str,
+    keyword: str,
+    hosts: list[str],
+    hours_back: int = 1,
+    limit: int = 50,
+) -> str:
+    """通过 Probe ops 聚合接口跨业务主机搜索日志。默认禁用，启用后仅允许白名单 host。"""
+    data = await _probe(
+        "POST",
+        "/api/logs/ops/search",
+        json_body={
+            "service": service,
+            "keyword": keyword,
+            "hosts": hosts,
+            "hours_back": hours_back,
+            "limit": limit,
         },
     )
     return _json(data)
@@ -713,6 +1075,14 @@ def create_app() -> FastAPI:
         if not session:
             return {"error": "chat_session_not_found", "session_id": session_id}
         return session.model_dump(mode="json")
+
+    @app.post("/api/diagnosis/request")
+    async def diagnosis_request_api(body: dict):
+        try:
+            args = validate_tool_args("meridian_diagnose_request", body)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=exc.errors()) from exc
+        return await _diagnose_request(args)
 
     app.include_router(
         create_chat_router(_call_chat_tool, chat_session_store),

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useApp } from "../../context/AppContext";
 import { useInvestigation } from "../../context/InvestigationContext";
 import { useQueryHistory } from "../../hooks/useQueryHistory";
@@ -12,6 +13,7 @@ import {
 } from "../../api/client";
 
 export default function LensPage() {
+  const [params] = useSearchParams();
   const { toast } = useApp();
   const inv = useInvestigation();
   const { history, push: pushHistory, clear: clearHistory } = useQueryHistory();
@@ -24,6 +26,7 @@ export default function LensPage() {
   const [entityQuery, setEntityQuery] = useState("");
   const [entityDatabase, setEntityDatabase] = useState("");
   const [entityMenu, setEntityMenu] = useState("");
+  const [fieldQuery, setFieldQuery] = useState("");
 
   // Query state
   const [activeEntity, setActiveEntity] = useState("");
@@ -39,11 +42,35 @@ export default function LensPage() {
   const [importing, setImporting] = useState(false);
 
   useEffect(() => {
-    void loadEntities();
+    void bootLens();
     atlas.listDatabases()
       .then((r) => setAtlasDatabases(r.databases))
       .catch(() => setAtlasDatabases([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function bootLens() {
+    const list = await loadEntities();
+    const db = params.get("db") || "";
+    const table = params.get("table") || "";
+    const target = params.get("entity") || (db && table ? `${db}__${table}` : "");
+    if (!target) return;
+
+    const exists = list.some((entity) => entity.name === target);
+    if (!exists) {
+      setEntityQuery(table || target);
+      return;
+    }
+
+    await selectEntity(target);
+    if (params.get("action") === "count") {
+      setQueryMode("count");
+      setFilters([]);
+      setSelectedFields([]);
+      setOrderBy("");
+      void executeQuery({ entity: target, mode: "count", filters: [], fields: [], orderBy: "", limit: 1 });
+    }
+  }
 
   async function loadEntities() {
     try {
@@ -108,6 +135,7 @@ export default function LensPage() {
       setResult(null);
       setShowSql(false);
       setEntityMenu("");
+      setFieldQuery("");
     } catch {
       toast("error", `实体加载失败：${name}`);
     }
@@ -129,6 +157,10 @@ export default function LensPage() {
     setFilters(filters.filter((_, idx) => idx !== i));
   }
 
+  function addFieldFilter(field: string) {
+    setFilters((current) => [...current, { field, op: "eq", value: "" }]);
+  }
+
   // ── Field toggle ──
   function toggleField(name: string) {
     setSelectedFields((prev) =>
@@ -137,12 +169,28 @@ export default function LensPage() {
   }
 
   // ── Execute query ──
-  async function executeQuery() {
-    if (!activeEntity) return;
+  async function executeQuery(
+    overrides: Partial<{
+      mode: "rows" | "count";
+      entity: string;
+      filters: Array<{ field: string; op: string; value: string }>;
+      fields: string[];
+      orderBy: string;
+      limit: number;
+    }> = {}
+  ) {
+    const targetEntity = overrides.entity ?? activeEntity;
+    if (!targetEntity) return;
     setQueryLoading(true);
     setError("");
 
-    const validFilters: FilterCondition[] = filters
+    const nextMode = overrides.mode ?? queryMode;
+    const nextFilters = overrides.filters ?? filters;
+    const nextFields = overrides.fields ?? selectedFields;
+    const nextOrderBy = overrides.orderBy ?? orderBy;
+    const nextLimit = overrides.limit ?? limit;
+
+    const validFilters: FilterCondition[] = nextFilters
       .filter((f) => f.field && f.value)
       .map((f) => ({
         field: f.field,
@@ -151,12 +199,12 @@ export default function LensPage() {
       }));
 
     const dsl = {
-      entity: activeEntity,
+      entity: targetEntity,
       filter: validFilters.length > 0 ? validFilters : undefined,
-      field: queryMode === "rows" && selectedFields.length > 0 ? selectedFields : undefined,
-      aggregate: queryMode === "count" ? "count" as const : undefined,
-      order_by: queryMode === "rows" ? orderBy || undefined : undefined,
-      limit: queryMode === "count" ? 1 : limit,
+      field: nextMode === "rows" && nextFields.length > 0 ? nextFields : undefined,
+      aggregate: nextMode === "count" ? "count" as const : undefined,
+      order_by: nextMode === "rows" ? nextOrderBy || undefined : undefined,
+      limit: nextMode === "count" ? 1 : nextLimit,
     };
 
     try {
@@ -164,7 +212,7 @@ export default function LensPage() {
       setResult(r);
 
       pushHistory({
-        entity: activeEntity,
+        entity: targetEntity,
         dsl,
         resultCount: r.count,
         durationMs: r.duration_ms,
@@ -173,15 +221,60 @@ export default function LensPage() {
       if (r.success) {
         inv.push({
           type: "query",
-          label: `${activeEntity} (${r.count} 行)`,
+          label: `${targetEntity} (${r.count} 行)`,
           path: `/lens`,
-          data: { entity: activeEntity },
+          data: { entity: targetEntity },
         });
       }
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "查询失败");
     }
     setQueryLoading(false);
+  }
+
+  function applyDefaultFieldsTemplate() {
+    if (!selected) return;
+    const defaults = Object.values(selected.fields)
+      .filter((field) => field.default_visible && !field.sensitive)
+      .slice(0, 12)
+      .map((field) => field.name);
+    setQueryMode("rows");
+    setSelectedFields(defaults);
+    setResult(null);
+  }
+
+  function applyIdFilterTemplate() {
+    const idField =
+      filterableFields.find((field) => field === "id") ||
+      filterableFields.find((field) => field.endsWith("_id")) ||
+      filterableFields[0];
+    if (!idField) {
+      toast("info", "这个实体没有可筛选字段");
+      return;
+    }
+    setQueryMode("rows");
+    setFilters([{ field: idField, op: "eq", value: "" }]);
+    setResult(null);
+  }
+
+  function applyRecentTemplate() {
+    const timeField =
+      selected?.constraint.time_field ||
+      sortableFields.find((field) => /time|date|created|updated/i.test(field)) ||
+      sortableFields[0] ||
+      "";
+    setQueryMode("rows");
+    setOrderBy(timeField ? `-${timeField}` : "");
+    setLimit(20);
+    setResult(null);
+  }
+
+  function runCountAll() {
+    setQueryMode("count");
+    setFilters([]);
+    setSelectedFields([]);
+    setOrderBy("");
+    void executeQuery({ mode: "count", filters: [], fields: [], orderBy: "", limit: 1 });
   }
 
   // ── Load from history ──
@@ -213,6 +306,17 @@ export default function LensPage() {
   }
 
   const fieldNames = selected ? Object.keys(selected.fields) : [];
+  const filteredFieldNames = useMemo(() => {
+    if (!selected) return [];
+    const query = fieldQuery.trim().toLowerCase();
+    if (!query) return fieldNames;
+    return fieldNames.filter((name) => {
+      const field = selected.fields[name];
+      return [field.name, field.column, field.type, field.semantic]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(query));
+    });
+  }, [selected, fieldNames, fieldQuery]);
   const filterableFields = selected
     ? fieldNames.filter((n) => selected.fields[n]?.filterable)
     : [];
@@ -238,6 +342,7 @@ export default function LensPage() {
     });
   }, [entities, entityQuery, entityDatabase]);
   const hasEffectiveFilters = filters.some((f) => f.field && f.value.trim());
+  const countValue = Number(result?.count ?? 0);
 
   return (
     <>
@@ -427,9 +532,18 @@ export default function LensPage() {
                     <span className="badge badge-teal">{selected.db_type}</span>
                     {selected.datasource && <span className="badge badge-dim">{selected.datasource}</span>}
                   </div>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--t4)" }}>
-                    {selected.database}.{selected.primary_table}
-                  </span>
+                  <div className="row gap-sm">
+                    <input
+                      className="input"
+                      style={{ width: 220 }}
+                      placeholder="搜索字段、类型或语义"
+                      value={fieldQuery}
+                      onChange={(event) => setFieldQuery(event.target.value)}
+                    />
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--t4)", alignSelf: "center" }}>
+                      {selected.database}.{selected.primary_table}
+                    </span>
+                  </div>
                 </div>
                 <div className="card-body flush" style={{ maxHeight: 200, overflowY: "auto" }}>
                   <table className="dtable">
@@ -441,10 +555,13 @@ export default function LensPage() {
                         <th style={{ textAlign: "center" }}>可筛选</th>
                         <th style={{ textAlign: "center" }}>可排序</th>
                         <th style={{ textAlign: "center" }}>敏感</th>
+                        <th>操作</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {Object.values(selected.fields).map((f) => (
+                      {filteredFieldNames.map((name) => {
+                        const f = selected.fields[name];
+                        return (
                         <tr key={f.name}>
                           <td className="mono">{f.name}</td>
                           <td><span className="badge badge-dim">{f.type || "string"}</span></td>
@@ -456,8 +573,21 @@ export default function LensPage() {
                           <td style={{ textAlign: "center" }}>
                             {f.sensitive && <span className="badge badge-coral">是</span>}
                           </td>
+                          <td>
+                            <div className="row gap-xs">
+                              {f.filterable && (
+                                <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: "2px 6px" }} onClick={() => addFieldFilter(f.name)}>
+                                  筛选
+                                </button>
+                              )}
+                              <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: "2px 6px" }} onClick={() => toggleField(f.name)}>
+                                {selectedFields.includes(f.name) ? "取消返回" : "返回"}
+                              </button>
+                            </div>
+                          </td>
                         </tr>
-                      ))}
+                      );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -471,7 +601,7 @@ export default function LensPage() {
                     <button className="btn btn-ghost btn-sm" onClick={addFilter}>添加筛选</button>
                     <button
                       className="btn btn-primary btn-sm"
-                      onClick={executeQuery}
+                      onClick={() => executeQuery()}
                       disabled={queryLoading}
                     >
                       {queryLoading ? <><span className="spinner" /> 查询中</> : "执行查询"}
@@ -479,6 +609,21 @@ export default function LensPage() {
                   </div>
                 </div>
                 <div className="card-body">
+                  <div className="row gap-sm mb-md wrap">
+                    <div className="field-label" style={{ alignSelf: "center" }}>常用模板</div>
+                    <button className="btn btn-ghost btn-sm" onClick={runCountAll} disabled={queryLoading}>
+                      统计总数 / 判断空表
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={applyIdFilterTemplate}>
+                      按 ID 查询
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={applyDefaultFieldsTemplate}>
+                      返回默认字段
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={applyRecentTemplate}>
+                      最近记录排序
+                    </button>
+                  </div>
                   <div className="row gap-sm mb-md wrap">
                     <div className="field-label" style={{ alignSelf: "center" }}>查询模式</div>
                     <button
@@ -639,7 +784,9 @@ export default function LensPage() {
                       <div className="stat" style={{ textAlign: "left", padding: "18px 20px" }}>
                         <div className="stat-val teal">{result.count?.toLocaleString()}</div>
                         <div className="stat-label">
-                          {hasEffectiveFilters ? "当前实体与筛选条件命中的行数" : "当前实体的行数"}
+                          {countValue === 0
+                            ? hasEffectiveFilters ? "当前筛选条件没有命中数据" : "当前实体没有数据"
+                            : hasEffectiveFilters ? "当前实体与筛选条件命中的行数" : "当前实体的行数"}
                         </div>
                       </div>
                     ) : result.success && result.data && result.data.length > 0 ? (
