@@ -794,20 +794,22 @@ def get_context(file: str, line_number: int, before: int = 10, after: int = 10) 
         raise
 
 
-async def get_services() -> dict:
+async def get_services(*, atlas_fallback: bool = True) -> dict:
     """获取服务列表 — 优先从 Atlas 获取，降级到本地 supervisor 扫描"""
-    try:
-        services = await _fetch_services_from_atlas()
-        if services:
-            _audit("list_services", {"source": "atlas"}, len(services), False)
-            return {"services": services, "source": "atlas"}
-    except Exception:
-        pass
+    if atlas_fallback:
+        try:
+            services = await _fetch_services_from_atlas()
+            if services:
+                _audit("list_services", {"source": "atlas"}, len(services), False)
+                return {"services": services, "source": "atlas"}
+        except Exception:
+            pass
 
     # 降级：本地 supervisor 扫描
     services = file_adapter.list_supervisor_services()
-    _audit("list_services", {"source": "local"}, len(services), False)
-    return {"services": services, "source": "local"}
+    source = "supervisor_logs"
+    _audit("list_services", {"source": source}, len(services), False)
+    return {"services": services, "source": source}
 
 
 async def _fetch_services_from_atlas() -> list[str]:

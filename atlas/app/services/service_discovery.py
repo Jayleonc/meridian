@@ -41,6 +41,8 @@ async def refresh_services() -> list[ServiceInfo]:
 
             services = await provider.list_services()
             for svc in services:
+                if not svc.source:
+                    svc.source = provider.name
                 # 后注册的 Provider 不覆盖先注册的（优先级高的先注册）
                 if svc.name not in all_services:
                     all_services[svc.name] = svc
@@ -71,10 +73,7 @@ async def get_service_detail(name: str) -> ServiceInfo | None:
 
 
 def upsert_services(services: list[ServiceInfo]) -> None:
-    """将运行时服务声明写入缓存。
-
-    主要用于本地 demo 自举，不改变任何 Provider 配置。
-    """
+    """将运行时服务声明写入缓存。"""
     global _service_cache
     merged = {svc.name: svc for svc in _service_cache}
     for service in services:

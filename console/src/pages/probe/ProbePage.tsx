@@ -5,6 +5,7 @@ import { useInvestigation } from "../../context/InvestigationContext";
 import { usePolling } from "../../hooks/usePolling";
 import { probe, type LogContext, type LogItem, type SearchResult, type TraceSummary } from "../../api/client";
 import { formatLogTime } from "../../utils/time";
+import { serviceSourceLabel } from "../../utils/serviceLabels";
 
 type Tab = "errors" | "search" | "service" | "trace";
 
@@ -565,7 +566,9 @@ export default function ProbePage() {
                   />
                   <button className="btn btn-ghost btn-sm" onClick={() => void loadServices()}>刷新</button>
                 </div>
-                {serviceSource && <div className="field-label mb-sm">来源：{serviceSource}</div>}
+                {serviceSource && (
+                  <div className="field-label mb-sm">来源：{serviceSourceLabel(serviceSource)}</div>
+                )}
               </div>
               <div className="card-body flush service-list">
                 {filteredServices.length > 0 ? (

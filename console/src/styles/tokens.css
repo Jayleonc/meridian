@@ -2,24 +2,24 @@
 
 :root {
   /* ── Depth layers ── */
-  --void: #04060b;
-  --base: #080c16;
-  --surface: #0e1525;
-  --elevated: #152036;
-  --overlay: #1a2744;
-  --hover: #1e2d4a;
+  --void: #0a0f19;
+  --base: #101827;
+  --surface: #162235;
+  --elevated: #1d2b42;
+  --overlay: #263754;
+  --hover: #2d4264;
 
   /* ── Borders ── */
-  --border-0: #111b2e;
-  --border-1: #1a2844;
-  --border-2: #243656;
+  --border-0: #22314a;
+  --border-1: #2d4160;
+  --border-2: #3a5578;
   --border-focus: rgba(240, 168, 48, 0.4);
 
   /* ── Text ── */
   --t1: #eef2f7;
-  --t2: #9eafc4;
-  --t3: #5e7390;
-  --t4: #3a4f6a;
+  --t2: #c1ccda;
+  --t3: #8ca0b8;
+  --t4: #687b93;
 
   /* ── Accent: warm amber/gold ── */
   --amber: #f0a830;
@@ -37,7 +37,7 @@
   --warn-soft: rgba(251, 191, 36, 0.12);
   --violet: #a78bfa;
   --violet-soft: rgba(167, 139, 250, 0.12);
-  --slate: rgba(255, 255, 255, 0.06);
+  --slate: rgba(148, 163, 184, 0.14);
 
   /* ── Typography ── */
   --font-display: "Oxanium", sans-serif;
@@ -46,7 +46,7 @@
 
   /* ── Layout ── */
   --sidebar-w: 56px;
-  --sidebar-w-open: 208px;
+  --sidebar-w-open: 188px;
   --investigation-h: 44px;
 
   /* ── Motion ── */

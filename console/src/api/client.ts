@@ -24,10 +24,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export interface ServiceInfo {
   name: string;
   status: string;
+  source?: string;
   pid: number;
   deploy_path: string;
   log_path: string;
-  databases: string[];
+  database_list?: string[];
+  databases?: string[];
 }
 
 export interface AtlasStatus {
@@ -215,8 +217,10 @@ export interface TraceSummary {
 
 export const probe = {
   health: () => request<{ status: string }>("/svc/probe/health"),
-  listServices: () =>
-    request<{ services: string[]; source: string }>("/api/probe/logs/services"),
+  listServices: (atlasFallback = true) =>
+    request<{ services: string[]; source: string }>(
+      `/api/probe/logs/services?atlas_fallback=${atlasFallback ? "true" : "false"}`
+    ),
   tailErrors: (hoursBack = 1, limit = 50, includeFull = false) =>
     request<SearchResult>(
       `/api/probe/logs/errors?hours_back=${hoursBack}&limit=${limit}&include_full=${includeFull ? "true" : "false"}`

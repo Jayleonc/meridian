@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../../context/AppContext";
 import { useInvestigation } from "../../context/InvestigationContext";
 import { useQueryHistory } from "../../hooks/useQueryHistory";
@@ -21,6 +21,9 @@ export default function LensPage() {
   const [entityLoading, setEntityLoading] = useState(false);
   const [error, setError] = useState("");
   const [atlasDatabases, setAtlasDatabases] = useState<Array<{ database: string; table_count: number }>>([]);
+  const [entityQuery, setEntityQuery] = useState("");
+  const [entityDatabase, setEntityDatabase] = useState("");
+  const [entityMenu, setEntityMenu] = useState("");
 
   // Query state
   const [activeEntity, setActiveEntity] = useState("");
@@ -48,7 +51,7 @@ export default function LensPage() {
       setError("");
       return r.entity;
     } catch {
-      setError("Lens is offline");
+      setError("Lens 服务离线");
       return [];
     }
   }
@@ -58,31 +61,35 @@ export default function LensPage() {
     try {
       const r = await lens.importFromAtlas();
       if (r.imported > 0) {
-        toast("success", `Imported ${r.imported} entities from Atlas (${r.skipped} skipped)`);
+        toast("success", `已从 Atlas 导入 ${r.imported} 个实体，跳过 ${r.skipped} 个`);
         await loadEntities();
       } else if (r.skipped > 0) {
-        toast("info", `All ${r.skipped} entities already exist. Use overwrite to update.`);
+        toast("info", `${r.skipped} 个实体已存在；需要更新时再使用覆盖导入`);
       } else {
-        toast("info", r.errors.length > 0 ? r.errors[0] : "No tables found in Atlas");
+        toast("info", r.errors.length > 0 ? r.errors[0] : "Atlas 暂未提供可导入的表");
       }
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Import failed — is Atlas running?");
+      toast("error", e instanceof Error ? e.message : "导入失败，请确认 Atlas 已运行");
     }
     setImporting(false);
   }
 
   async function handleDeleteEntity(name: string) {
+    if (!window.confirm(`确认删除 Lens 实体「${name}」？这只会删除 Lens 查询映射，不会删除业务表。`)) {
+      return;
+    }
     try {
       await lens.deleteEntity(name);
-      toast("success", `Deleted ${name}`);
+      toast("success", `已删除 ${name}`);
       if (activeEntity === name) {
         setSelected(null);
         setActiveEntity("");
         setResult(null);
       }
+      setEntityMenu("");
       await loadEntities();
     } catch {
-      toast("error", "Delete failed");
+      toast("error", "删除失败");
     }
   }
 
@@ -98,8 +105,9 @@ export default function LensPage() {
       setOrderBy("");
       setResult(null);
       setShowSql(false);
+      setEntityMenu("");
     } catch {
-      toast("error", `Failed to load entity: ${name}`);
+      toast("error", `实体加载失败：${name}`);
     }
     setEntityLoading(false);
   }
@@ -162,13 +170,13 @@ export default function LensPage() {
       if (r.success) {
         inv.push({
           type: "query",
-          label: `${activeEntity} (${r.count} rows)`,
+          label: `${activeEntity} (${r.count} 行)`,
           path: `/lens`,
           data: { entity: activeEntity },
         });
       }
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Query failed");
+      toast("error", e instanceof Error ? e.message : "查询失败");
     }
     setQueryLoading(false);
   }
@@ -207,8 +215,23 @@ export default function LensPage() {
     ? fieldNames.filter((n) => selected.fields[n]?.sortable)
     : [];
   const atlasSummary = atlasDatabases.length > 0
-    ? `Atlas has ${atlasDatabases.map((db) => `${db.database} (${db.table_count} tables)`).join(", ")}.`
+    ? `Atlas 当前有 ${atlasDatabases.map((db) => `${db.database}（${db.table_count} 张表）`).join("、")}。`
     : "";
+  const entityDatabases = useMemo(
+    () => Array.from(new Set(entities.map((e) => e.database).filter(Boolean))).sort(),
+    [entities]
+  );
+  const filteredEntities = useMemo(() => {
+    const query = entityQuery.trim().toLowerCase();
+    return entities.filter((e) => {
+      const inDatabase = !entityDatabase || e.database === entityDatabase;
+      if (!inDatabase) return false;
+      if (!query) return true;
+      return [e.name, e.display_name, e.database, e.db_type]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(query));
+    });
+  }, [entities, entityQuery, entityDatabase]);
 
   return (
     <>
@@ -220,10 +243,10 @@ export default function LensPage() {
           </div>
           <div className="row gap-sm">
             <button className="btn btn-ghost btn-sm" onClick={() => setShowHistory(!showHistory)}>
-              History {history.length > 0 && <span className="badge badge-dim" style={{ marginLeft: 4 }}>{history.length}</span>}
+              查询历史 {history.length > 0 && <span className="badge badge-dim" style={{ marginLeft: 4 }}>{history.length}</span>}
             </button>
             <button className="btn btn-primary btn-sm" onClick={handleImportFromAtlas} disabled={importing}>
-              {importing ? <><span className="spinner" /> Importing</> : "Import from Atlas"}
+              {importing ? <><span className="spinner" /> 导入中</> : "从 Atlas 导入"}
             </button>
           </div>
         </div>
@@ -231,15 +254,36 @@ export default function LensPage() {
 
       <div className="page-body" style={{ display: "flex", gap: 14, overflow: "hidden", padding: "14px 28px 28px" }}>
         {/* ── Entity list panel ── */}
-        <div style={{ width: 240, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+        <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column" }}>
           <div className="card fade-up" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
             <div className="card-head">
-              <h3>Entities</h3>
-              <span className="badge badge-teal">{entities.length}</span>
+              <h3>实体</h3>
+              <span className="badge badge-teal">{filteredEntities.length}/{entities.length}</span>
+            </div>
+            <div className="card-body" style={{ borderBottom: "1px solid var(--border-0)" }}>
+              <div className="row gap-sm">
+                <input
+                  className="input"
+                  placeholder="搜索实体、表名或数据库"
+                  value={entityQuery}
+                  onChange={(e) => setEntityQuery(e.target.value)}
+                />
+                {entityDatabases.length > 1 && (
+                  <select
+                    className="input"
+                    style={{ width: 120 }}
+                    value={entityDatabase}
+                    onChange={(e) => setEntityDatabase(e.target.value)}
+                  >
+                    <option value="">全部库</option>
+                    {entityDatabases.map((db) => <option key={db} value={db}>{db}</option>)}
+                  </select>
+                )}
+              </div>
             </div>
             <div className="card-body flush" style={{ flex: 1, overflowY: "auto" }}>
-              {entities.length > 0 ? (
-                entities.map((e) => (
+              {filteredEntities.length > 0 ? (
+                filteredEntities.map((e) => (
                   <div
                     key={e.name}
                     onClick={() => selectEntity(e.name)}
@@ -264,29 +308,62 @@ export default function LensPage() {
                     <div className="row gap-xs mt-xs" style={{ justifyContent: "space-between" }}>
                       <div className="row gap-xs">
                         <span className="badge badge-dim">{e.db_type}</span>
-                        <span className="badge badge-dim">{e.field_count}f</span>
+                        <span className="badge badge-dim">{e.field_count} 字段</span>
+                        <span className="badge badge-dim">{e.database}</span>
                       </div>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        style={{ fontSize: 9, padding: "1px 5px", color: "var(--coral)", opacity: 0.5 }}
-                        onClick={(ev) => { ev.stopPropagation(); handleDeleteEntity(e.name); }}
-                        title="Delete entity"
-                      >
-                        {"\u2715"}
-                      </button>
+                      <div style={{ position: "relative" }}>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: 11, padding: "1px 7px", color: "var(--t3)" }}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            setEntityMenu(entityMenu === e.name ? "" : e.name);
+                          }}
+                          title="更多操作"
+                        >
+                          ...
+                        </button>
+                        {entityMenu === e.name && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              right: 0,
+                              top: 24,
+                              zIndex: 5,
+                              minWidth: 96,
+                              background: "var(--elevated)",
+                              border: "1px solid var(--border-1)",
+                              borderRadius: "var(--r)",
+                              padding: 4,
+                              boxShadow: "0 10px 24px rgba(0,0,0,0.28)",
+                            }}
+                            onClick={(ev) => ev.stopPropagation()}
+                          >
+                            <button
+                              className="btn btn-danger btn-sm"
+                              style={{ width: "100%", justifyContent: "center" }}
+                              onClick={() => handleDeleteEntity(e.name)}
+                            >
+                              删除实体
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))
               ) : (
                 <div className="empty" style={{ padding: 24 }}>
                   <div className="empty-text">
-                    {error || `No entities. ${atlasSummary || "Atlas schema is not loaded yet."} Click "Import from Atlas" to auto-generate query entities.`}
+                    {error || (entities.length > 0 ? "没有匹配的实体" : `还没有实体。${atlasSummary || "Atlas 尚未加载 Schema。"} 可从 Atlas 导入生成查询实体。`)}
                   </div>
-                  <div className="row gap-sm mt-md" style={{ justifyContent: "center" }}>
-                    <button className="btn btn-primary btn-sm" onClick={handleImportFromAtlas} disabled={importing}>
-                      {importing ? "Importing..." : "Import from Atlas"}
-                    </button>
-                  </div>
+                  {entities.length === 0 && (
+                    <div className="row gap-sm mt-md" style={{ justifyContent: "center" }}>
+                      <button className="btn btn-primary btn-sm" onClick={handleImportFromAtlas} disabled={importing}>
+                        {importing ? "导入中..." : "从 Atlas 导入"}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -298,8 +375,8 @@ export default function LensPage() {
           {showHistory && (
             <div className="card mb-md fade-up">
               <div className="card-head">
-                <h3>Query History</h3>
-                <button className="btn btn-danger btn-sm" onClick={clearHistory}>Clear</button>
+                <h3>查询历史</h3>
+                <button className="btn btn-danger btn-sm" onClick={clearHistory}>清空</button>
               </div>
               <div className="card-body flush" style={{ maxHeight: 200, overflowY: "auto" }}>
                 {history.length > 0 ? (
@@ -316,7 +393,7 @@ export default function LensPage() {
                         {entry.entity}
                       </span>
                       {entry.resultCount !== undefined && (
-                        <span className="badge badge-dim">{entry.resultCount} rows</span>
+                        <span className="badge badge-dim">{entry.resultCount} 行</span>
                       )}
                       {entry.durationMs !== undefined && (
                         <span style={{ color: "var(--t4)", fontSize: 11 }}>{entry.durationMs}ms</span>
@@ -325,7 +402,7 @@ export default function LensPage() {
                   ))
                 ) : (
                   <div className="empty" style={{ padding: 16 }}>
-                    <div className="empty-text">No query history</div>
+                    <div className="empty-text">暂无查询历史</div>
                   </div>
                 )}
               </div>
@@ -352,12 +429,12 @@ export default function LensPage() {
                   <table className="dtable">
                     <thead>
                       <tr>
-                        <th>Field</th>
-                        <th>Type</th>
-                        <th>Semantic</th>
-                        <th style={{ textAlign: "center" }}>Filter</th>
-                        <th style={{ textAlign: "center" }}>Sort</th>
-                        <th style={{ textAlign: "center" }}>Sensitive</th>
+                        <th>字段</th>
+                        <th>类型</th>
+                        <th>语义</th>
+                        <th style={{ textAlign: "center" }}>可筛选</th>
+                        <th style={{ textAlign: "center" }}>可排序</th>
+                        <th style={{ textAlign: "center" }}>敏感</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -371,7 +448,7 @@ export default function LensPage() {
                           <td style={{ textAlign: "center" }}>{f.filterable ? "\u2713" : ""}</td>
                           <td style={{ textAlign: "center" }}>{f.sortable ? "\u2713" : ""}</td>
                           <td style={{ textAlign: "center" }}>
-                            {f.sensitive && <span className="badge badge-coral">yes</span>}
+                            {f.sensitive && <span className="badge badge-coral">是</span>}
                           </td>
                         </tr>
                       ))}
@@ -383,15 +460,15 @@ export default function LensPage() {
               {/* Query builder */}
               <div className="card mb-md">
                 <div className="card-head">
-                  <h3>Query Builder</h3>
+                  <h3>查询构建器</h3>
                   <div className="row gap-sm">
-                    <button className="btn btn-ghost btn-sm" onClick={addFilter}>+ Filter</button>
+                    <button className="btn btn-ghost btn-sm" onClick={addFilter}>添加筛选</button>
                     <button
                       className="btn btn-primary btn-sm"
                       onClick={executeQuery}
                       disabled={queryLoading}
                     >
-                      {queryLoading ? <><span className="spinner" /> Running</> : "\u25B6 Execute"}
+                      {queryLoading ? <><span className="spinner" /> 查询中</> : "执行查询"}
                     </button>
                   </div>
                 </div>
@@ -399,11 +476,11 @@ export default function LensPage() {
                   {/* Filters */}
                   {filters.length > 0 && (
                     <div className="mb-md">
-                      <div className="field-label mb-sm">Filters</div>
+                      <div className="field-label mb-sm">筛选条件</div>
                       {filters.map((f, i) => (
                         <div key={i} className="row gap-sm mb-sm">
                           <select className="input" style={{ width: 150 }} value={f.field} onChange={(e) => updateFilter(i, "field", e.target.value)}>
-                            <option value="">field...</option>
+                            <option value="">选择字段...</option>
                             {filterableFields.map((n) => <option key={n} value={n}>{n}</option>)}
                           </select>
                           <select className="input" style={{ width: 90 }} value={f.op} onChange={(e) => updateFilter(i, "op", e.target.value)}>
@@ -414,13 +491,13 @@ export default function LensPage() {
                           <input
                             className="input"
                             style={{ flex: 1 }}
-                            placeholder={f.op === "in" ? "val1, val2, ..." : f.op === "between" ? "start,end" : "value..."}
+                            placeholder={f.op === "in" ? "值1, 值2, ..." : f.op === "between" ? "起始,结束" : "输入值..."}
                             value={f.value}
                             onChange={(e) => updateFilter(i, "value", e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && executeQuery()}
                           />
                           <button className="btn btn-ghost btn-sm" style={{ color: "var(--coral)", padding: "4px 8px" }} onClick={() => removeFilter(i)}>
-                            {"\u2715"}
+                            移除
                           </button>
                         </div>
                       ))}
@@ -430,7 +507,7 @@ export default function LensPage() {
                   {/* Fields */}
                   <div className="mb-md">
                     <div className="field-label mb-sm">
-                      Fields {selectedFields.length > 0 && `(${selectedFields.length})`}
+                      返回字段 {selectedFields.length > 0 && `(${selectedFields.length})`}
                     </div>
                     <div className="row gap-xs wrap">
                       {fieldNames.map((n) => {
@@ -442,16 +519,16 @@ export default function LensPage() {
                             className={`badge ${active ? "badge-teal" : "badge-dim"}`}
                             style={{ cursor: "pointer", border: "none", opacity: isSensitive && !active ? 0.5 : 1 }}
                             onClick={() => toggleField(n)}
-                            title={isSensitive ? "Sensitive field - will be masked" : undefined}
+                            title={isSensitive ? "敏感字段会被脱敏" : undefined}
                           >
-                            {isSensitive ? "\uD83D\uDD12 " : ""}{n}
+                            {isSensitive ? "敏感 " : ""}{n}
                           </button>
                         );
                       })}
                     </div>
                     {selectedFields.length === 0 && (
                       <div style={{ fontSize: 11, color: "var(--t4)", marginTop: 4 }}>
-                        All default_visible fields will be returned
+                        未选择时返回默认可见字段
                       </div>
                     )}
                   </div>
@@ -459,9 +536,9 @@ export default function LensPage() {
                   {/* Order & Limit */}
                   <div className="row gap-md">
                     <div style={{ flex: 1 }}>
-                      <div className="field-label mb-sm">Order By</div>
+                      <div className="field-label mb-sm">排序</div>
                       <select className="input" value={orderBy} onChange={(e) => setOrderBy(e.target.value)}>
-                        <option value="">default</option>
+                        <option value="">默认排序</option>
                         {sortableFields.map((n) => (
                           <option key={n} value={n}>{n} ASC</option>
                         ))}
@@ -471,7 +548,7 @@ export default function LensPage() {
                       </select>
                     </div>
                     <div style={{ width: 100 }}>
-                      <div className="field-label mb-sm">Limit</div>
+                      <div className="field-label mb-sm">返回上限</div>
                       <input
                         className="input"
                         type="number"
@@ -489,23 +566,23 @@ export default function LensPage() {
               {result && (
                 <div className="card fade-up">
                   <div className="card-head">
-                    <h3>Results</h3>
+                    <h3>查询结果</h3>
                     <div className="row gap-sm">
                       {result.success ? (
                         <>
-                          <span className="badge badge-emerald">{result.count} rows</span>
+                          <span className="badge badge-emerald">{result.count} 行</span>
                           <span className="badge badge-dim">{result.duration_ms}ms</span>
                           {result.sql && (
                             <button
                               className="btn btn-ghost btn-sm"
                               onClick={() => setShowSql(!showSql)}
                             >
-                              {showSql ? "Hide SQL" : "Show SQL"}
+                              {showSql ? "隐藏 SQL" : "显示 SQL"}
                             </button>
                           )}
                         </>
                       ) : (
-                        <span className="badge badge-coral">Error</span>
+                        <span className="badge badge-coral">错误</span>
                       )}
                     </div>
                   </div>
@@ -558,7 +635,7 @@ export default function LensPage() {
                       </div>
                     ) : (
                       <div className="empty">
-                        <div className="empty-text">No results returned</div>
+                        <div className="empty-text">没有返回结果</div>
                       </div>
                     )}
                   </div>
@@ -571,7 +648,7 @@ export default function LensPage() {
                 <div className="empty" style={{ height: 300 }}>
                   <div className="empty-icon">{"\u25C8"}</div>
                   <div className="empty-text">
-                    {entityLoading ? "Loading..." : "Select an entity to explore and query"}
+                    {entityLoading ? "加载中..." : "选择一个实体后开始查询"}
                   </div>
                 </div>
               </div>

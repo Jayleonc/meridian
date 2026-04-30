@@ -18,9 +18,9 @@ router = APIRouter(prefix="/logs", tags=["logs"])
 
 
 @router.get("/services")
-async def list_services():
+async def list_services(atlas_fallback: bool = Query(True)):
     """列出可观测的服务"""
-    return await get_services()
+    return await get_services(atlas_fallback=atlas_fallback)
 
 
 @router.get("/services/{service}/tail")

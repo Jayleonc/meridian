@@ -39,7 +39,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     probe: "checking",
     lens: "checking",
   });
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastId = useRef(0);
 

@@ -5,6 +5,7 @@ import { useInvestigation } from "../context/InvestigationContext";
 import { usePolling } from "../hooks/usePolling";
 import { atlas, lens, probe, type AtlasStatus, type LogItem, type ServiceInfo } from "../api/client";
 import { formatLogTime } from "../utils/time";
+import { serviceDatabases, serviceSourceLabel, serviceStatusBadge, serviceStatusLabel } from "../utils/serviceLabels";
 
 const SVC = {
   atlas: { port: 3001, desc: "元数据中心 — Schema 管理与服务注册" },
@@ -219,6 +220,7 @@ export default function Dashboard() {
                   <tr>
                     <th>名称</th>
                     <th>状态</th>
+                    <th>来源</th>
                     <th>PID</th>
                     <th>路径</th>
                     <th>数据库</th>
@@ -241,19 +243,22 @@ export default function Dashboard() {
                         {svc.name}
                       </td>
                       <td>
-                        <span className={`badge ${svc.status === "RUNNING" ? "badge-emerald" : "badge-coral"}`}>
-                          {svc.status}
+                        <span className={`badge ${serviceStatusBadge(svc.status)}`}>
+                          {serviceStatusLabel(svc.status)}
                         </span>
                       </td>
+                      <td><span className="badge badge-dim">{serviceSourceLabel(svc.source)}</span></td>
                       <td className="mono">{svc.pid || "\u2014"}</td>
                       <td className="mono truncate" style={{ maxWidth: 200, fontSize: 11 }}>
                         {svc.deploy_path || "\u2014"}
                       </td>
                       <td>
                         <div className="row gap-xs wrap">
-                          {svc.databases?.map((d) => (
-                            <span key={d} className="badge badge-dim">{d}</span>
-                          )) ?? "\u2014"}
+                          {serviceDatabases(svc).length > 0
+                            ? serviceDatabases(svc).map((d) => (
+                              <span key={d} className="badge badge-dim">{d}</span>
+                            ))
+                            : "\u2014"}
                         </div>
                       </td>
                     </tr>

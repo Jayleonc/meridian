@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useApp } from "../../context/AppContext";
 import { useInvestigation } from "../../context/InvestigationContext";
@@ -10,6 +10,7 @@ import {
   type TableInfo,
   type Annotation,
 } from "../../api/client";
+import { serviceDatabases, serviceSourceLabel, serviceStatusBadge, serviceStatusLabel } from "../../utils/serviceLabels";
 
 type Tab = "schemas" | "services" | "annotations";
 
@@ -30,6 +31,8 @@ export default function AtlasPage() {
   const [tables, setTables] = useState<TableSummary[]>([]);
   const [selectedTable, setSelectedTable] = useState<TableInfo | null>(null);
   const [tableLoading, setTableLoading] = useState(false);
+  const [tableQuery, setTableQuery] = useState("");
+  const [serviceQuery, setServiceQuery] = useState("");
 
   // Annotation state
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -110,7 +113,7 @@ export default function AtlasPage() {
       const detail = await atlas.getTable(db, tableName);
       setSelectedTable(detail);
     } catch {
-      toast("error", `Failed to load table ${tableName}`);
+      toast("error", `表结构加载失败：${tableName}`);
     }
     setTableLoading(false);
   }
@@ -119,11 +122,11 @@ export default function AtlasPage() {
     setCollecting(true);
     try {
       const r = await atlas.collectSchema(selectedDb || undefined);
-      toast("success", `Collected ${r.collected} database(s)`);
+      toast("success", `已采集 ${r.collected} 个数据库`);
       await loadDatabases();
       if (selectedDb) await loadTables(selectedDb);
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Collection failed");
+      toast("error", e instanceof Error ? e.message : "采集失败");
     }
     setCollecting(false);
   }
@@ -139,11 +142,11 @@ export default function AtlasPage() {
         semantic: annotateSemantic,
         source: "manual",
       });
-      toast("success", `Annotated ${annotateCol}`);
+      toast("success", `已标注 ${annotateCol}`);
       setAnnotateSemantic("");
       if (annotateDb === selectedDb) await loadAnnotations(selectedDb);
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Annotation failed");
+      toast("error", e instanceof Error ? e.message : "标注失败");
     }
     setAnnotating(false);
   }
@@ -156,10 +159,10 @@ export default function AtlasPage() {
         column: ann.column,
         confirmed,
       });
-      toast("success", confirmed ? "Confirmed" : "Rejected");
+      toast("success", confirmed ? "已确认" : "已驳回");
       await loadAnnotations(ann.database);
     } catch {
-      toast("error", "Failed");
+      toast("error", "操作失败");
     }
   }
 
@@ -169,7 +172,7 @@ export default function AtlasPage() {
       const r = await atlas.searchMeta(searchQuery.trim());
       setSearchResult({ matched_table: r.matched_table, matched_column: r.matched_column });
     } catch {
-      toast("error", "Search failed");
+      toast("error", "搜索失败");
     }
   }
 
@@ -178,9 +181,9 @@ export default function AtlasPage() {
     try {
       const r = await atlas.refreshServices();
       setServices(r.service);
-      toast("success", `Found ${r.count} services`);
+      toast("success", `发现 ${r.count} 个服务`);
     } catch {
-      toast("error", "Refresh failed");
+      toast("error", "刷新失败");
     }
     setRefreshing(false);
   }
@@ -188,6 +191,33 @@ export default function AtlasPage() {
   function setTab(t: Tab) {
     setParams({ tab: t, ...(selectedDb ? { db: selectedDb } : {}) });
   }
+
+  const filteredTables = useMemo(() => {
+    const query = tableQuery.trim().toLowerCase();
+    if (!query) return tables;
+    return tables.filter((t) =>
+      [t.name, t.comment, t.engine]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(query))
+    );
+  }, [tables, tableQuery]);
+
+  const filteredServices = useMemo(() => {
+    const query = serviceQuery.trim().toLowerCase();
+    if (!query) return services;
+    return services.filter((svc) =>
+      [
+        svc.name,
+        svc.status,
+        svc.source ?? "",
+        svc.deploy_path,
+        svc.log_path,
+        ...serviceDatabases(svc),
+      ]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(query))
+    );
+  }, [services, serviceQuery]);
 
   return (
     <>
@@ -268,10 +298,20 @@ export default function AtlasPage() {
                 <div className="card fade-up stagger-1" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
                   <div className="card-head">
                     <h3>{selectedDb} 的表</h3>
-                    <span className="badge badge-teal">{tables.length}</span>
+                    <span className="badge badge-teal">
+                      {filteredTables.length}/{tables.length}
+                    </span>
+                  </div>
+                  <div className="card-body" style={{ borderBottom: "1px solid var(--border-0)" }}>
+                    <input
+                      className="input"
+                      placeholder="过滤表名、注释或引擎"
+                      value={tableQuery}
+                      onChange={(e) => setTableQuery(e.target.value)}
+                    />
                   </div>
                   <div className="card-body flush" style={{ flex: 1, overflowY: "auto" }}>
-                    {tables.map((t) => (
+                    {filteredTables.length > 0 ? filteredTables.map((t) => (
                       <div
                         key={t.name}
                         onClick={() => selectTable(selectedDb, t.name)}
@@ -296,7 +336,11 @@ export default function AtlasPage() {
                           <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>{t.comment}</div>
                         )}
                       </div>
-                    ))}
+                    )) : (
+                      <div className="empty" style={{ padding: 20 }}>
+                        <div className="empty-text">没有匹配的表</div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -386,7 +430,7 @@ export default function AtlasPage() {
                       onClick={() =>
                         inv.push({
                           type: "entity",
-                          label: `Query ${selectedTable.name}`,
+                          label: `查询 ${selectedTable.name}`,
                           path: "/lens",
                           data: { database: selectedTable.database, table: selectedTable.name },
                         })
@@ -589,7 +633,14 @@ export default function AtlasPage() {
         {/* ════ SERVICES TAB ════ */}
         {tab === "services" && (
           <div className="fade-up">
-            <div className="row gap-sm mb-md">
+            <div className="row gap-sm mb-md wrap">
+              <input
+                className="input"
+                style={{ maxWidth: 320 }}
+                placeholder="搜索服务、来源、路径或数据库"
+                value={serviceQuery}
+                onChange={(e) => setServiceQuery(e.target.value)}
+              />
               <button className="btn btn-primary btn-sm" onClick={handleRefreshServices} disabled={refreshing}>
                 {refreshing ? <><span className="spinner" /> 刷新中</> : "刷新服务"}
               </button>
@@ -605,16 +656,24 @@ export default function AtlasPage() {
             <div className="card">
               <div className="card-head">
                 <h3>已发现服务</h3>
-                <span className="badge badge-teal">{services.length}</span>
+                <span className="badge badge-teal">{filteredServices.length}/{services.length}</span>
               </div>
               <div className="card-body flush" style={{ overflowX: "auto" }}>
-                {services.length > 0 ? (
+                {filteredServices.length > 0 ? (
                   <table className="dtable">
                     <thead>
-                      <tr><th>名称</th><th>状态</th><th>PID</th><th>部署路径</th><th>日志路径</th><th>数据库</th></tr>
+                      <tr>
+                        <th>名称</th>
+                        <th>状态</th>
+                        <th>来源</th>
+                        <th>PID</th>
+                        <th>部署路径</th>
+                        <th>日志路径</th>
+                        <th>数据库</th>
+                      </tr>
                     </thead>
                     <tbody>
-                      {services.map((svc) => (
+                      {filteredServices.map((svc) => (
                         <tr key={svc.name} style={params.get("svc") === svc.name ? { background: "var(--amber-glow)" } : undefined}>
                           <td
                             className="mono link"
@@ -629,16 +688,23 @@ export default function AtlasPage() {
                           >
                             {svc.name}
                           </td>
-                          <td><span className={`badge ${svc.status === "RUNNING" ? "badge-emerald" : "badge-coral"}`}>{svc.status}</span></td>
+                          <td>
+                            <span className={`badge ${serviceStatusBadge(svc.status)}`}>
+                              {serviceStatusLabel(svc.status)}
+                            </span>
+                          </td>
+                          <td><span className="badge badge-dim">{serviceSourceLabel(svc.source)}</span></td>
                           <td className="mono">{svc.pid || "\u2014"}</td>
                           <td className="mono truncate" style={{ maxWidth: 200, fontSize: 11 }}>{svc.deploy_path || "\u2014"}</td>
                           <td className="mono truncate" style={{ maxWidth: 200, fontSize: 11 }}>{svc.log_path || "\u2014"}</td>
                           <td>
                             <div className="row gap-xs wrap">
-                              {svc.databases?.map((d) => (
-                                <span key={d} className="badge badge-dim" style={{ cursor: "pointer" }}
-                                  onClick={() => { setSelectedDb(d); setTab("schemas"); }}>{d}</span>
-                              )) ?? "\u2014"}
+                              {serviceDatabases(svc).length > 0
+                                ? serviceDatabases(svc).map((d) => (
+                                  <span key={d} className="badge badge-dim" style={{ cursor: "pointer" }}
+                                    onClick={() => { setSelectedDb(d); setTab("schemas"); }}>{d}</span>
+                                ))
+                                : "\u2014"}
                             </div>
                           </td>
                         </tr>
@@ -646,7 +712,12 @@ export default function AtlasPage() {
                     </tbody>
                   </table>
                 ) : (
-                  <div className="empty"><div className="empty-icon">{"\u2B22"}</div><div className="empty-text">还没有发现服务</div></div>
+                  <div className="empty" style={{ padding: 28 }}>
+                    <div className="empty-icon">{"\u2B22"}</div>
+                    <div className="empty-text">
+                      {services.length > 0 ? "没有匹配的服务" : "还没有发现服务，请刷新或检查 supervisor / Probe 日志来源配置"}
+                    </div>
+                  </div>
                 )}
               </div>
             </div>

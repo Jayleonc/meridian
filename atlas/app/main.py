@@ -29,6 +29,7 @@ _refresh_task: asyncio.Task | None = None
 
 def _setup_discovery_providers():
     """根据配置注册服务发现 Provider"""
+    from app.adapters.probe_log_provider import ProbeLogProvider
     from app.adapters.supervisor_adapter import SupervisorProvider
     from app.adapters.static_provider import StaticProvider
     from app.services.service_discovery import register_provider
@@ -48,6 +49,13 @@ def _setup_discovery_providers():
                 svc.model_dump() for svc in cfg.discovery.static_services
             ]
             provider = StaticProvider(services=static_services)
+            register_provider(provider)
+        elif provider_name == "probe_logs":
+            provider = ProbeLogProvider(
+                enabled=cfg.probe_logs.enabled,
+                base_url=cfg.probe_logs.base_url,
+                timeout_seconds=cfg.probe_logs.timeout_seconds,
+            )
             register_provider(provider)
         else:
             logger.warning("未知的服务发现 Provider: %s", provider_name)

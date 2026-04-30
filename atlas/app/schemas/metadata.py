@@ -79,10 +79,11 @@ class SchemaDiff(BaseModel):
 
 
 class ServiceInfo(BaseModel):
-    """业务服务信息（来自 supervisor）"""
+    """业务服务信息"""
 
     name: str
     status: str = "UNKNOWN"  # RUNNING / STOPPED / FATAL / UNKNOWN
+    source: str = ""  # supervisor / static / probe_logs
     pid: int | None = None
     deploy_path: str = ""
     log_path: str = ""

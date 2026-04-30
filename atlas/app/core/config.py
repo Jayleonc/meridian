@@ -43,11 +43,20 @@ class SupervisorConfig(BaseModel):
     log_dir: str = "/var/log/supervisor"
 
 
+class ProbeLogDiscoveryConfig(BaseModel):
+    """Probe 日志服务发现配置（兜底来源）"""
+
+    enabled: bool = False
+    base_url: str = "http://127.0.0.1:3002"
+    timeout_seconds: int = 5
+
+
 class StaticServiceConfig(BaseModel):
     """静态服务声明（本地开发 / 手动注册）"""
 
     name: str
     status: str = "RUNNING"
+    source: str = ""
     deploy_path: str = ""
     log_path: str = ""
     database_list: list[str] = []
@@ -79,6 +88,7 @@ class Settings(BaseModel):
     business_mysql: BusinessMySQLConfig = BusinessMySQLConfig()
     meridian_db: MeridianDBConfig = MeridianDBConfig()
     supervisor: SupervisorConfig = SupervisorConfig()
+    probe_logs: ProbeLogDiscoveryConfig = ProbeLogDiscoveryConfig()
     discovery: ServiceDiscoveryConfig = ServiceDiscoveryConfig()
     snapshot: SnapshotConfig = SnapshotConfig()
     limits: LimitsConfig = LimitsConfig()

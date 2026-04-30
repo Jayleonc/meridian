@@ -25,6 +25,18 @@ supervisor:
   xmlrpc_url: "http://127.0.0.1:9001/RPC2"
   log_dir: /var/log/supervisor
 
+discovery:
+  providers:
+    - supervisor
+    - static
+    - probe_logs
+  static_services: []
+
+probe_logs:
+  enabled: false
+  base_url: "http://127.0.0.1:3002"
+  timeout_seconds: 5
+
 snapshot:
   auto_refresh_enabled: true
   refresh_interval_hours: 1

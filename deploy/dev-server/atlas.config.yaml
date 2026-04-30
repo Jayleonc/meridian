@@ -29,7 +29,13 @@ discovery:
   providers:
     - supervisor
     - static
+    - probe_logs
   static_services: []
+
+probe_logs:
+  enabled: true
+  base_url: "http://127.0.0.1:3002"
+  timeout_seconds: 5
 
 snapshot:
   collect_on_startup: false
