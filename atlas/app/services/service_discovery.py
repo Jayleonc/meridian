@@ -70,6 +70,18 @@ async def get_service_detail(name: str) -> ServiceInfo | None:
     return None
 
 
+def upsert_services(services: list[ServiceInfo]) -> None:
+    """将运行时服务声明写入缓存。
+
+    主要用于本地 demo 自举，不改变任何 Provider 配置。
+    """
+    global _service_cache
+    merged = {svc.name: svc for svc in _service_cache}
+    for service in services:
+        merged[service.name] = service
+    _service_cache = sorted(merged.values(), key=lambda s: s.name)
+
+
 def clear() -> None:
     """清空 Provider 和缓存（测试用）"""
     _providers.clear()

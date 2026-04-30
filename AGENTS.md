@@ -14,12 +14,12 @@ Meridian 是一个 MCP（Model Context Protocol）驱动的智能运维观测平
 
 | 服务 | 内部端口 | 职责 | 状态 |
 |------|---------|------|------|
-| nexus | 3001 | MCP 网关 — 请求路由与协议转发 | Stub（延后） |
-| atlas | 3004 | 元数据 MCP — Schema 管理与服务注册 | **已实现** |
-| probe | 3005 | 日志观测 MCP — 日志搜索与分析 | **已实现** |
-| lens | 3006 | 数据查询 MCP — 业务实体映射 | **已实现** |
-| trace | 3007 | 链路关联 MCP — 分布式追踪 | Stub |
-| console | 3010 | React 19 + TypeScript + Vite 6 前端 | **已实现** |
+| nexus | 3000 | MCP 网关 — 单入口、服务代理、Agent API、DevOps MCP | **已实现 MVP** |
+| atlas | 3001 | 元数据 MCP — Schema 管理与服务注册 | **已实现** |
+| probe | 3002 | 日志观测 MCP — 日志搜索与分析 | **已实现** |
+| lens | 3003 | 数据查询 MCP — 业务实体映射 | **已实现** |
+| trace | 3004 | 链路关联 MCP — 分布式追踪 | Stub |
+| console | 由 nexus 托管 | React 19 + TypeScript + Vite 6 前端 | **已实现** |
 | codex | — | 诊断知识库 | Stub |
 | forge | — | MCP Builder — 模板驱动配置生成（Jinja2） | Stub |
 
@@ -76,14 +76,14 @@ cd console && npm run build    # 生产构建
 - **PostgreSQL**：Docker 容器 `ai-assistant-postgres`（root/jayleonc, port **15432**, database meridian）— Meridian 平台存储（快照、标注、变更日志、审计）；不启动时 Atlas 自动降级为纯内存模式
 - **外部暴露端口**：`3000`（Nexus 网关 + Console 前端）— 所有请求通过此端口
 - **内部服务端口**（完全可配置，见 `docs/DEPLOYMENT.md`）：
-  - Nexus: 3001 (网关)
-  - Atlas: 3004 (元数据)
-  - Probe: 3005 (日志)
-  - Lens: 3006 (数据查询)
-  - Trace: 3007 (链路)
-  - Console: 3010 (前端)
-  - PostgreSQL: 3011
-  - MySQL: 3012
+  - Nexus: 3000 (网关 + Console 静态资源)
+  - Atlas: 3001 (元数据)
+  - Probe: 3002 (日志)
+  - Lens: 3003 (数据查询)
+  - Trace: 3004 (链路)
+  - Console: 由 Nexus 托管；本地 Vite 开发时才单独运行
+  - PostgreSQL: 15432（平台库 host port；容器内 5432）
+  - MySQL: 3306（本地 mock 或业务库只读入口）
 
 ## 代码规范
 
@@ -123,7 +123,7 @@ cd console && npm run build    # 生产构建
 | 文件 | 内容 |
 |------|------|
 | `architecture.html` | 架构全景可视化 — 交互式 HTML 页面，展示 6 层架构、10+ 核心组件、4 条数据流，以及命名词典 |
-| `chat-with-AGENTS.md` | 与 Codex 的技术讨论 — 语义层设计、DSL vs SQL 决策、MCP 模板化生成、变更同步策略、Atlas 优先的理由 |
+| `chat-with-claude.md` | 与 Claude 的技术讨论 — 语义层设计、DSL vs SQL 决策、MCP 模板化生成、变更同步策略、Atlas 优先的理由 |
 | `chat-with-chatgpt.md` | 与 ChatGPT 的战略讨论 — 项目可行性评估、单人执行风险、MVP 策略（Atlas + Probe + Console 先行）、个人成长价值 |
 | `from-probe-to-diagnosis-system.md` | 从 Probe 到诊断系统的演进 — 五层诊断能力模型、知识沉淀模板、分阶段实施路线（最详细的执行指南） |
 

@@ -31,11 +31,20 @@ export default function LensPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [showSql, setShowSql] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [seedingDemo, setSeedingDemo] = useState(false);
 
-  useEffect(() => { loadEntities(); }, []);
+  useEffect(() => { void loadEntities(); }, []);
 
-  function loadEntities() {
-    lens.listEntities().then((r) => setEntities(r.entity)).catch(() => setError("Lens is offline"));
+  async function loadEntities() {
+    try {
+      const r = await lens.listEntities();
+      setEntities(r.entity);
+      setError("");
+      return r.entity;
+    } catch {
+      setError("Lens is offline");
+      return [];
+    }
   }
 
   async function handleImportFromAtlas() {
@@ -44,7 +53,7 @@ export default function LensPage() {
       const r = await lens.importFromAtlas();
       if (r.imported > 0) {
         toast("success", `Imported ${r.imported} entities from Atlas (${r.skipped} skipped)`);
-        loadEntities();
+        await loadEntities();
       } else if (r.skipped > 0) {
         toast("info", `All ${r.skipped} entities already exist. Use overwrite to update.`);
       } else {
@@ -56,6 +65,26 @@ export default function LensPage() {
     setImporting(false);
   }
 
+  async function handleSeedDemo() {
+    setSeedingDemo(true);
+    try {
+      const r = await lens.seedDemo();
+      toast("success", `Demo entities ready: ${r.imported}`);
+      await loadEntities();
+      const first = r.entities.includes("demo_order") ? "demo_order" : r.entities[0];
+      if (first) {
+        await selectEntity(first);
+        if (first === "demo_order") {
+          setFilters([{ field: "order_id", op: "eq", value: "ORD-1001" }]);
+          setOrderBy("-updated_at");
+        }
+      }
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Demo load failed");
+    }
+    setSeedingDemo(false);
+  }
+
   async function handleDeleteEntity(name: string) {
     try {
       await lens.deleteEntity(name);
@@ -65,7 +94,7 @@ export default function LensPage() {
         setActiveEntity("");
         setResult(null);
       }
-      loadEntities();
+      await loadEntities();
     } catch {
       toast("error", "Delete failed");
     }
@@ -207,6 +236,9 @@ export default function LensPage() {
             <button className="btn btn-primary btn-sm" onClick={handleImportFromAtlas} disabled={importing}>
               {importing ? <><span className="spinner" /> Importing</> : "Import from Atlas"}
             </button>
+            <button className="btn btn-primary btn-sm" onClick={handleSeedDemo} disabled={seedingDemo}>
+              {seedingDemo ? <><span className="spinner" /> Loading</> : "Load Demo"}
+            </button>
           </div>
         </div>
       </div>
@@ -262,7 +294,15 @@ export default function LensPage() {
               ) : (
                 <div className="empty" style={{ padding: 24 }}>
                   <div className="empty-text">
-                    {error || 'No entities. Click "Import from Atlas" to auto-generate.'}
+                    {error || 'No entities. Import from Atlas for real schema, or load the local demo.'}
+                  </div>
+                  <div className="row gap-sm mt-md" style={{ justifyContent: "center" }}>
+                    <button className="btn btn-ghost btn-sm" onClick={handleImportFromAtlas} disabled={importing}>
+                      Import from Atlas
+                    </button>
+                    <button className="btn btn-primary btn-sm" onClick={handleSeedDemo} disabled={seedingDemo}>
+                      {seedingDemo ? "Loading..." : "Load Demo"}
+                    </button>
                   </div>
                 </div>
               )}
