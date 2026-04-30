@@ -17,8 +17,6 @@ from datetime import datetime, timedelta
 from app.core.config import get_settings
 from app.schemas.query import (
     EntityDefinition,
-    EntityField,
-    FilterCondition,
     QueryDSL,
     ValidationResult,
 )
@@ -204,10 +202,10 @@ def compile_to_sql(
     params.extend(time_params)
 
     # ── ORDER BY ──
-    order_clause = _build_order_by(dsl, entity, dialect)
+    order_clause = "" if dsl.aggregate == "count" else _build_order_by(dsl, entity, dialect)
 
     # ── LIMIT ──
-    limit = min(dsl.limit, cfg.query.max_limit)
+    limit = 1 if dsl.aggregate == "count" else min(dsl.limit, cfg.query.max_limit)
 
     # ── 组装 SQL ──
     sql = f"SELECT {select_fields} FROM {from_clause}"
@@ -227,6 +225,9 @@ def _build_select_fields(
     dialect: SQLDialect,
 ) -> str:
     """构建 SELECT 字段列表，敏感字段自动脱敏。"""
+    if dsl.aggregate == "count":
+        return "COUNT(*) AS count"
+
     if dsl.field:
         field_names = dsl.field
     else:

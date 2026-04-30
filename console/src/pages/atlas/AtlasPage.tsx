@@ -36,6 +36,15 @@ export default function AtlasPage() {
 
   // Annotation state
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [annotationTotal, setAnnotationTotal] = useState(0);
+  const [annotationPage, setAnnotationPage] = useState(1);
+  const [annotationPageSize, setAnnotationPageSize] = useState(100);
+  const [annotationQuery, setAnnotationQuery] = useState("");
+  const [annotationTableFilter, setAnnotationTableFilter] = useState("");
+  const [annotationSource, setAnnotationSource] = useState("");
+  const [annotationStatus, setAnnotationStatus] = useState("");
+  const [annotationLoading, setAnnotationLoading] = useState(false);
+  const [selectedAnnotationKeys, setSelectedAnnotationKeys] = useState<string[]>([]);
   const [annotateDb, setAnnotateDb] = useState("");
   const [annotateTable, setAnnotateTable] = useState("");
   const [annotateCol, setAnnotateCol] = useState("");
@@ -67,9 +76,15 @@ export default function AtlasPage() {
   useEffect(() => {
     if (selectedDb) {
       loadTables(selectedDb);
-      loadAnnotations(selectedDb);
+      setAnnotationPage(1);
+      setSelectedAnnotationKeys([]);
     }
   }, [selectedDb]);
+
+  useEffect(() => {
+    if (selectedDb) void loadAnnotations(selectedDb);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDb, annotationPage, annotationPageSize, annotationTableFilter, annotationSource, annotationStatus]);
 
   async function loadStatus() {
     try {
@@ -99,12 +114,30 @@ export default function AtlasPage() {
   }
 
   async function loadAnnotations(db: string) {
+    setAnnotationLoading(true);
     try {
-      const r = await atlas.listAnnotations(db);
+      const confirmed =
+        annotationStatus === "confirmed"
+          ? true
+          : annotationStatus === "pending"
+            ? false
+            : undefined;
+      const r = await atlas.listAnnotations(db, {
+        table: annotationTableFilter || undefined,
+        q: annotationQuery.trim() || undefined,
+        source: annotationSource || undefined,
+        confirmed,
+        limit: annotationPageSize,
+        offset: (annotationPage - 1) * annotationPageSize,
+      });
       setAnnotations(r.annotations);
+      setAnnotationTotal(r.total ?? r.count);
+      setSelectedAnnotationKeys([]);
     } catch {
       setAnnotations([]);
+      setAnnotationTotal(0);
     }
+    setAnnotationLoading(false);
   }
 
   async function selectTable(db: string, tableName: string) {
@@ -154,15 +187,34 @@ export default function AtlasPage() {
   async function handleConfirm(ann: Annotation, confirmed: boolean) {
     try {
       await atlas.confirmAnnotation({
-        database: ann.database,
-        table: ann.table,
-        column: ann.column,
+        database: annotationDatabase(ann),
+        table: annotationTable(ann),
+        column: annotationColumn(ann),
         confirmed,
       });
       toast("success", confirmed ? "已确认" : "已驳回");
-      await loadAnnotations(ann.database);
+      await loadAnnotations(annotationDatabase(ann));
     } catch {
       toast("error", "操作失败");
+    }
+  }
+
+  async function handleBatchConfirm(confirmed: boolean) {
+    const selected = annotations.filter((ann) => selectedAnnotationKeys.includes(annotationKey(ann)));
+    if (!selected.length) return;
+    try {
+      const r = await atlas.confirmAnnotations({
+        annotations: selected.map((ann) => ({
+          database: annotationDatabase(ann),
+          table: annotationTable(ann),
+          column: annotationColumn(ann),
+        })),
+        confirmed,
+      });
+      toast("success", confirmed ? `已确认 ${r.success} 条` : `已驳回 ${r.success} 条`);
+      await loadAnnotations(selectedDb);
+    } catch {
+      toast("error", "批量操作失败");
     }
   }
 
@@ -218,6 +270,50 @@ export default function AtlasPage() {
         .some((value) => value.toLowerCase().includes(query))
     );
   }, [services, serviceQuery]);
+
+  const annotationPageCount = Math.max(1, Math.ceil(annotationTotal / annotationPageSize));
+  const currentAnnotationKeys = annotations.map(annotationKey);
+  const allCurrentAnnotationsSelected =
+    currentAnnotationKeys.length > 0 &&
+    currentAnnotationKeys.every((key) => selectedAnnotationKeys.includes(key));
+
+  function annotationDatabase(ann: Annotation) {
+    return ann.database || ann.database_name || selectedDb;
+  }
+
+  function annotationTable(ann: Annotation) {
+    return ann.table || ann.table_name || "";
+  }
+
+  function annotationColumn(ann: Annotation) {
+    return ann.column || ann.column_name || "";
+  }
+
+  function annotationKey(ann: Annotation) {
+    return `${annotationDatabase(ann)}.${annotationTable(ann)}.${annotationColumn(ann)}`;
+  }
+
+  function toggleAnnotationSelection(key: string) {
+    setSelectedAnnotationKeys((prev) =>
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
+    );
+  }
+
+  function toggleCurrentPageAnnotations() {
+    if (allCurrentAnnotationsSelected) {
+      setSelectedAnnotationKeys((prev) => prev.filter((key) => !currentAnnotationKeys.includes(key)));
+    } else {
+      setSelectedAnnotationKeys((prev) => Array.from(new Set([...prev, ...currentAnnotationKeys])));
+    }
+  }
+
+  function applyAnnotationFilters() {
+    if (annotationPage === 1) {
+      void loadAnnotations(selectedDb);
+    } else {
+      setAnnotationPage(1);
+    }
+  }
 
   return (
     <>
@@ -574,14 +670,104 @@ export default function AtlasPage() {
                     <option value="">选择数据库...</option>
                     {databases.map((d) => <option key={d.database} value={d.database}>{d.database}</option>)}
                   </select>
-                  <span className="badge badge-teal">{annotations.length}</span>
+                  <span className="badge badge-teal">{annotationTotal}</span>
                 </div>
               </div>
-              <div className="card-body flush" style={{ maxHeight: 500, overflowY: "auto" }}>
+              <div className="card-body" style={{ borderBottom: "1px solid var(--border-0)" }}>
+                <div className="row gap-sm wrap">
+                  <input
+                    className="input"
+                    style={{ minWidth: 220, flex: 1 }}
+                    placeholder="搜索表、字段或语义"
+                    value={annotationQuery}
+                    onChange={(e) => setAnnotationQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && applyAnnotationFilters()}
+                  />
+                  <select
+                    className="input"
+                    style={{ width: 220 }}
+                    value={annotationTableFilter}
+                    onChange={(e) => {
+                      setAnnotationTableFilter(e.target.value);
+                      setAnnotationPage(1);
+                    }}
+                  >
+                    <option value="">全部表</option>
+                    {tables.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
+                  </select>
+                  <select
+                    className="input"
+                    style={{ width: 120 }}
+                    value={annotationSource}
+                    onChange={(e) => {
+                      setAnnotationSource(e.target.value);
+                      setAnnotationPage(1);
+                    }}
+                  >
+                    <option value="">全部来源</option>
+                    <option value="manual">manual</option>
+                    <option value="ai">ai</option>
+                    <option value="rule">rule</option>
+                    <option value="auto">auto</option>
+                  </select>
+                  <select
+                    className="input"
+                    style={{ width: 120 }}
+                    value={annotationStatus}
+                    onChange={(e) => {
+                      setAnnotationStatus(e.target.value);
+                      setAnnotationPage(1);
+                    }}
+                  >
+                    <option value="">全部状态</option>
+                    <option value="pending">待确认</option>
+                    <option value="confirmed">已确认</option>
+                  </select>
+                  <button className="btn btn-primary btn-sm" onClick={applyAnnotationFilters} disabled={!selectedDb}>
+                    搜索
+                  </button>
+                </div>
+                <div className="row gap-sm mt-sm wrap">
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => handleBatchConfirm(true)}
+                    disabled={selectedAnnotationKeys.length === 0}
+                  >
+                    批量确认 {selectedAnnotationKeys.length || ""}
+                  </button>
+                  <button
+                    className="btn btn-danger btn-sm"
+                    onClick={() => handleBatchConfirm(false)}
+                    disabled={selectedAnnotationKeys.length === 0}
+                  >
+                    批量驳回 {selectedAnnotationKeys.length || ""}
+                  </button>
+                  <select
+                    className="input"
+                    style={{ width: 110 }}
+                    value={annotationPageSize}
+                    onChange={(e) => {
+                      setAnnotationPageSize(Number(e.target.value));
+                      setAnnotationPage(1);
+                    }}
+                  >
+                    {[50, 100, 200, 500].map((n) => <option key={n} value={n}>{n} 条/页</option>)}
+                  </select>
+                  {annotationLoading && <span className="badge badge-amber"><span className="spinner" /> 加载中</span>}
+                </div>
+              </div>
+              <div className="card-body flush" style={{ maxHeight: 520, overflowY: "auto" }}>
                 {annotations.length > 0 ? (
                   <table className="dtable">
                     <thead>
                       <tr>
+                        <th style={{ width: 34 }}>
+                          <input
+                            type="checkbox"
+                            checked={allCurrentAnnotationsSelected}
+                            onChange={toggleCurrentPageAnnotations}
+                          />
+                        </th>
                         <th>表.字段</th>
                         <th>语义</th>
                         <th>来源</th>
@@ -590,9 +776,18 @@ export default function AtlasPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {annotations.map((ann, i) => (
-                        <tr key={i}>
-                          <td className="mono">{ann.table}.{ann.column}</td>
+                      {annotations.map((ann) => {
+                        const key = annotationKey(ann);
+                        return (
+                        <tr key={key}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={selectedAnnotationKeys.includes(key)}
+                              onChange={() => toggleAnnotationSelection(key)}
+                            />
+                          </td>
+                          <td className="mono">{annotationTable(ann)}.{annotationColumn(ann)}</td>
                           <td style={{ color: "var(--teal)" }}>{ann.semantic}</td>
                           <td><span className={`badge ${ann.source === "manual" ? "badge-amber" : ann.source === "ai" ? "badge-violet" : "badge-dim"}`}>{ann.source}</span></td>
                           <td>
@@ -615,7 +810,8 @@ export default function AtlasPage() {
                             )}
                           </td>
                         </tr>
-                      ))}
+                      );
+                      })}
                     </tbody>
                   </table>
                 ) : (
@@ -625,6 +821,29 @@ export default function AtlasPage() {
                     </div>
                   </div>
                 )}
+              </div>
+              <div className="card-body" style={{ borderTop: "1px solid var(--border-0)" }}>
+                <div className="flex-between">
+                  <span className="field-label">
+                    第 {annotationPage} / {annotationPageCount} 页，当前显示 {annotations.length} 条
+                  </span>
+                  <div className="row gap-sm">
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      disabled={annotationPage <= 1}
+                      onClick={() => setAnnotationPage((p) => Math.max(1, p - 1))}
+                    >
+                      上一页
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      disabled={annotationPage >= annotationPageCount}
+                      onClick={() => setAnnotationPage((p) => Math.min(annotationPageCount, p + 1))}
+                    >
+                      下一页
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

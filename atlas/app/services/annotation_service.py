@@ -55,6 +55,27 @@ async def get_annotations(database: str, table: str | None = None) -> list[dict]
     return await pg_adapter.get_annotations(database, table)
 
 
+async def search_annotations(
+    database: str,
+    table: str | None = None,
+    q: str = "",
+    source: str = "",
+    confirmed: bool | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict:
+    """分页搜索语义标注。"""
+    return await pg_adapter.search_annotations(
+        database_name=database,
+        table_name=table,
+        q=q,
+        source=source,
+        confirmed=confirmed,
+        limit=limit,
+        offset=offset,
+    )
+
+
 async def delete_annotation(database: str, table: str, column: str) -> bool:
     """删除单条标注。"""
     return await pg_adapter.delete_annotation(database, table, column)
@@ -148,6 +169,11 @@ async def confirm_annotation(
 ) -> bool:
     """确认或拒绝标注。confirmed=False 时删除该标注。"""
     return await pg_adapter.confirm_annotation(database, table, column, confirmed)
+
+
+async def confirm_annotations(annotations: list[dict], confirmed: bool = True) -> dict:
+    """批量确认或驳回标注。"""
+    return await pg_adapter.confirm_annotations(annotations, confirmed)
 
 
 async def get_annotation_stats(database: str) -> dict:

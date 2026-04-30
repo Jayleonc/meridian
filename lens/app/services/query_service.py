@@ -79,6 +79,7 @@ async def execute_dsl_query(dsl: QueryDSL) -> QueryResult:
     # 5. 执行查询
     cfg = get_settings().query
     rows = await adapter.execute_readonly_query(sql, params, timeout=cfg.timeout_seconds)
+    result_count = _result_count(dsl, rows)
     duration_ms = int((time.monotonic() - start) * 1000)
 
     # 6. 记录查询审计
@@ -87,7 +88,7 @@ async def execute_dsl_query(dsl: QueryDSL) -> QueryResult:
             entity=dsl.entity,
             dsl=dsl.model_dump(),
             sql_generated=sql,
-            result_count=len(rows),
+            result_count=result_count,
             duration_ms=duration_ms,
             status="success",
         )
@@ -97,7 +98,7 @@ async def execute_dsl_query(dsl: QueryDSL) -> QueryResult:
     return QueryResult(
         success=True,
         data=rows,
-        count=len(rows),
+        count=result_count,
         sql=sql,
         duration_ms=duration_ms,
     )
@@ -113,3 +114,16 @@ async def validate_dsl_query(dsl: QueryDSL) -> ValidationResult:
         )
 
     return validate_dsl(dsl, entity)
+
+
+def _result_count(dsl: QueryDSL, rows: list[dict]) -> int:
+    if dsl.aggregate != "count" or not rows:
+        return len(rows)
+
+    value = rows[0].get("count")
+    if value is None:
+        value = rows[0].get("COUNT(*)")
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0

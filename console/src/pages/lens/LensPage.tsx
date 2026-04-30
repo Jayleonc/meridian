@@ -31,6 +31,7 @@ export default function LensPage() {
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
   const [orderBy, setOrderBy] = useState("");
   const [limit, setLimit] = useState(20);
+  const [queryMode, setQueryMode] = useState<"rows" | "count">("rows");
   const [result, setResult] = useState<QueryResult | null>(null);
   const [queryLoading, setQueryLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -103,6 +104,7 @@ export default function LensPage() {
       setFilters([]);
       setSelectedFields([]);
       setOrderBy("");
+      setQueryMode("rows");
       setResult(null);
       setShowSql(false);
       setEntityMenu("");
@@ -151,9 +153,10 @@ export default function LensPage() {
     const dsl = {
       entity: activeEntity,
       filter: validFilters.length > 0 ? validFilters : undefined,
-      field: selectedFields.length > 0 ? selectedFields : undefined,
-      order_by: orderBy || undefined,
-      limit,
+      field: queryMode === "rows" && selectedFields.length > 0 ? selectedFields : undefined,
+      aggregate: queryMode === "count" ? "count" as const : undefined,
+      order_by: queryMode === "rows" ? orderBy || undefined : undefined,
+      limit: queryMode === "count" ? 1 : limit,
     };
 
     try {
@@ -187,6 +190,7 @@ export default function LensPage() {
     const dsl = entry.dsl as {
       filter?: Array<{ field: string; op: string; value: unknown }>;
       field?: string[];
+      aggregate?: "count";
       order_by?: string;
       limit?: number;
     };
@@ -202,6 +206,7 @@ export default function LensPage() {
         );
       }
       if (dsl.field) setSelectedFields(dsl.field);
+      setQueryMode(dsl.aggregate === "count" ? "count" : "rows");
       if (dsl.order_by) setOrderBy(dsl.order_by);
       if (dsl.limit) setLimit(dsl.limit);
     });
@@ -473,6 +478,25 @@ export default function LensPage() {
                   </div>
                 </div>
                 <div className="card-body">
+                  <div className="row gap-sm mb-md wrap">
+                    <div className="field-label" style={{ alignSelf: "center" }}>查询模式</div>
+                    <button
+                      className={`btn btn-sm ${queryMode === "rows" ? "btn-primary" : "btn-ghost"}`}
+                      onClick={() => setQueryMode("rows")}
+                    >
+                      明细
+                    </button>
+                    <button
+                      className={`btn btn-sm ${queryMode === "count" ? "btn-primary" : "btn-ghost"}`}
+                      onClick={() => setQueryMode("count")}
+                    >
+                      Count
+                    </button>
+                    {queryMode === "count" && (
+                      <span className="badge badge-dim">只统计当前筛选条件命中的行数，不返回明细字段</span>
+                    )}
+                  </div>
+
                   {/* Filters */}
                   {filters.length > 0 && (
                     <div className="mb-md">
@@ -505,6 +529,7 @@ export default function LensPage() {
                   )}
 
                   {/* Fields */}
+                  {queryMode === "rows" && (
                   <div className="mb-md">
                     <div className="field-label mb-sm">
                       返回字段 {selectedFields.length > 0 && `(${selectedFields.length})`}
@@ -532,8 +557,10 @@ export default function LensPage() {
                       </div>
                     )}
                   </div>
+                  )}
 
                   {/* Order & Limit */}
+                  {queryMode === "rows" && (
                   <div className="row gap-md">
                     <div style={{ flex: 1 }}>
                       <div className="field-label mb-sm">排序</div>
@@ -559,6 +586,7 @@ export default function LensPage() {
                       />
                     </div>
                   </div>
+                  )}
                 </div>
               </div>
 
@@ -570,7 +598,9 @@ export default function LensPage() {
                     <div className="row gap-sm">
                       {result.success ? (
                         <>
-                          <span className="badge badge-emerald">{result.count} 行</span>
+                          <span className="badge badge-emerald">
+                            {queryMode === "count" ? `Count ${result.count}` : `${result.count} 行`}
+                          </span>
                           <span className="badge badge-dim">{result.duration_ms}ms</span>
                           {result.sql && (
                             <button
@@ -604,7 +634,12 @@ export default function LensPage() {
                   )}
 
                   <div className="card-body flush" style={{ overflowX: "auto", maxHeight: 400 }}>
-                    {result.success && result.data && result.data.length > 0 ? (
+                    {result.success && queryMode === "count" ? (
+                      <div className="stat" style={{ textAlign: "left", padding: "18px 20px" }}>
+                        <div className="stat-val teal">{result.count?.toLocaleString()}</div>
+                        <div className="stat-label">当前实体与筛选条件命中的行数</div>
+                      </div>
+                    ) : result.success && result.data && result.data.length > 0 ? (
                       <table className="dtable">
                         <thead>
                           <tr>

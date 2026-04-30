@@ -35,8 +35,21 @@ def _setup_discovery_providers():
     from app.services.service_discovery import register_provider
 
     cfg = get_settings()
+    provider_names = list(dict.fromkeys(cfg.discovery.providers))
+    if cfg.probe_logs.enabled and "probe_logs" not in provider_names:
+        provider_names.append("probe_logs")
+        logger.warning(
+            "probe_logs 已启用但未在 discovery.providers 中，已自动追加到服务发现 Provider"
+        )
 
-    for provider_name in cfg.discovery.providers:
+    logger.info(
+        "服务发现 Provider 配置: providers=%s, probe_logs_enabled=%s, probe_logs_base_url=%s",
+        provider_names,
+        cfg.probe_logs.enabled,
+        cfg.probe_logs.base_url,
+    )
+
+    for provider_name in provider_names:
         if provider_name == "supervisor":
             provider = SupervisorProvider(
                 enabled=cfg.supervisor.enabled,

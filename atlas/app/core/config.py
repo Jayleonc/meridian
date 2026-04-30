@@ -46,7 +46,7 @@ class SupervisorConfig(BaseModel):
 class ProbeLogDiscoveryConfig(BaseModel):
     """Probe 日志服务发现配置（兜底来源）"""
 
-    enabled: bool = False
+    enabled: bool = True
     base_url: str = "http://127.0.0.1:3002"
     timeout_seconds: int = 5
 
@@ -65,7 +65,7 @@ class StaticServiceConfig(BaseModel):
 class ServiceDiscoveryConfig(BaseModel):
     """服务发现配置"""
 
-    providers: list[str] = ["supervisor", "static"]  # 按优先级排序
+    providers: list[str] = ["supervisor", "static", "probe_logs"]  # 按优先级排序
     static_services: list[StaticServiceConfig] = []
 
 

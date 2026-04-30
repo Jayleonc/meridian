@@ -295,18 +295,76 @@ async def get_annotations(database_name: str, table_name: str | None = None) -> 
                 database_name,
             )
     return [
-        {
-            "id": str(r["id"]),
-            "database_name": r["database_name"],
-            "table_name": r["table_name"],
-            "column_name": r["column_name"],
-            "semantic": r["semantic"],
-            "source": r["source"],
-            "confirmed": r["confirmed"],
-            "updated_at": r["updated_at"],
-        }
+        _annotation_row_to_dict(r)
         for r in rows
     ]
+
+
+async def search_annotations(
+    database_name: str,
+    table_name: str | None = None,
+    q: str = "",
+    source: str = "",
+    confirmed: bool | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict:
+    """分页搜索语义标注。"""
+    pool = get_pool()
+    if not pool:
+        return {"total": 0, "annotations": []}
+
+    limit = min(max(limit, 1), 500)
+    offset = max(offset, 0)
+    conditions = ["database_name = $1"]
+    args: list = [database_name]
+    arg_idx = 2
+
+    if table_name:
+        conditions.append(f"table_name = ${arg_idx}")
+        args.append(table_name)
+        arg_idx += 1
+
+    if q:
+        conditions.append(
+            f"(table_name ILIKE ${arg_idx} OR column_name ILIKE ${arg_idx} OR semantic ILIKE ${arg_idx})"
+        )
+        args.append(f"%{q}%")
+        arg_idx += 1
+
+    if source:
+        conditions.append(f"source = ${arg_idx}")
+        args.append(source)
+        arg_idx += 1
+
+    if confirmed is not None:
+        conditions.append(f"confirmed = ${arg_idx}")
+        args.append(confirmed)
+        arg_idx += 1
+
+    where_sql = " AND ".join(conditions)
+    async with pool.acquire() as conn:
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM semantic_annotation WHERE {where_sql}",
+            *args,
+        )
+        rows = await conn.fetch(
+            f"""
+            SELECT id, database_name, table_name, column_name, semantic, source, confirmed, updated_at
+            FROM semantic_annotation
+            WHERE {where_sql}
+            ORDER BY table_name, column_name
+            LIMIT ${arg_idx} OFFSET ${arg_idx + 1}
+            """,
+            *args,
+            limit,
+            offset,
+        )
+
+    return {
+        "total": total or 0,
+        "annotations": [_annotation_row_to_dict(r) for r in rows],
+    }
 
 
 async def get_annotation(database_name: str, table_name: str, column_name: str) -> dict | None:
@@ -328,14 +386,7 @@ async def get_annotation(database_name: str, table_name: str, column_name: str) 
     if not row:
         return None
     return {
-        "id": str(row["id"]),
-        "database_name": row["database_name"],
-        "table_name": row["table_name"],
-        "column_name": row["column_name"],
-        "semantic": row["semantic"],
-        "source": row["source"],
-        "confirmed": row["confirmed"],
-        "updated_at": row["updated_at"],
+        **_annotation_row_to_dict(row),
     }
 
 
@@ -355,16 +406,7 @@ async def list_pending_annotations(database_name: str) -> list[dict]:
             database_name,
         )
     return [
-        {
-            "id": str(r["id"]),
-            "database_name": r["database_name"],
-            "table_name": r["table_name"],
-            "column_name": r["column_name"],
-            "semantic": r["semantic"],
-            "source": r["source"],
-            "confirmed": r["confirmed"],
-            "updated_at": r["updated_at"],
-        }
+        _annotation_row_to_dict(r)
         for r in rows
     ]
 
@@ -399,6 +441,72 @@ async def confirm_annotation(
             column_name,
         )
         return int(result.split()[-1]) > 0
+
+
+async def confirm_annotations(annotations: list[dict], confirmed: bool = True) -> dict:
+    """批量确认或驳回标注。confirmed=False 时删除对应标注。"""
+    pool = get_pool()
+    if not pool:
+        return {"success": 0, "failed": len(annotations)}
+
+    success = 0
+    failed = 0
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            for ann in annotations:
+                database_name = ann.get("database") or ann.get("database_name")
+                table_name = ann.get("table") or ann.get("table_name")
+                column_name = ann.get("column") or ann.get("column_name")
+                if not database_name or not table_name or not column_name:
+                    failed += 1
+                    continue
+                if confirmed:
+                    result = await conn.execute(
+                        """
+                        UPDATE semantic_annotation
+                        SET confirmed = TRUE, updated_at = now()
+                        WHERE database_name = $1 AND table_name = $2 AND column_name = $3
+                        """,
+                        database_name,
+                        table_name,
+                        column_name,
+                    )
+                else:
+                    result = await conn.execute(
+                        """
+                        DELETE FROM semantic_annotation
+                        WHERE database_name = $1 AND table_name = $2 AND column_name = $3
+                        """,
+                        database_name,
+                        table_name,
+                        column_name,
+                    )
+                changed = int(result.split()[-1])
+                if changed:
+                    success += changed
+                else:
+                    failed += 1
+    return {"success": success, "failed": failed}
+
+
+def _annotation_row_to_dict(row) -> dict:
+    """统一返回字段名，同时保留旧字段兼容前端和服务层。"""
+    database_name = row["database_name"]
+    table_name = row["table_name"]
+    column_name = row["column_name"]
+    return {
+        "id": str(row["id"]),
+        "database_name": database_name,
+        "table_name": table_name,
+        "column_name": column_name,
+        "database": database_name,
+        "table": table_name,
+        "column": column_name,
+        "semantic": row["semantic"],
+        "source": row["source"],
+        "confirmed": row["confirmed"],
+        "updated_at": row["updated_at"],
+    }
 
 
 async def get_annotation_stats(database_name: str) -> dict:

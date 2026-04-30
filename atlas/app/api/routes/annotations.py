@@ -3,16 +3,17 @@
 供 Console 前端管理语义标注 — 查看、添加、确认、统计。
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.services.annotation_service import (
     batch_annotate,
     confirm_annotation,
+    confirm_annotations,
     get_annotation_stats,
-    get_annotations,
     list_pending_annotations,
     save_annotation,
+    search_annotations,
 )
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
@@ -33,16 +34,43 @@ class ConfirmRequest(BaseModel):
     confirmed: bool = True
 
 
+class BatchConfirmRequest(BaseModel):
+    annotations: list[dict]
+    confirmed: bool = True
+
+
 class BatchAnnotateRequest(BaseModel):
     annotations: list[dict]
     source: str = "ai"
 
 
 @router.get("/{database}")
-async def list_annotations(database: str, table: str | None = None):
-    """列出指定数据库（或表）的所有语义标注"""
-    result = await get_annotations(database, table)
-    return {"count": len(result), "annotations": result}
+async def list_annotations(
+    database: str,
+    table: str | None = None,
+    q: str = "",
+    source: str = "",
+    confirmed: bool | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """分页列出指定数据库（或表）的语义标注。"""
+    result = await search_annotations(
+        database=database,
+        table=table,
+        q=q,
+        source=source,
+        confirmed=confirmed,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "count": len(result["annotations"]),
+        "total": result["total"],
+        "limit": limit,
+        "offset": offset,
+        "annotations": result["annotations"],
+    }
 
 
 @router.get("/{database}/pending")
@@ -81,6 +109,16 @@ async def confirm(req: ConfirmRequest):
         confirmed=req.confirmed,
     )
     return {"confirmed": req.confirmed, "success": ok}
+
+
+@router.post("/confirm-batch")
+async def confirm_batch(req: BatchConfirmRequest):
+    """批量确认或驳回标注"""
+    result = await confirm_annotations(
+        annotations=req.annotations,
+        confirmed=req.confirmed,
+    )
+    return {"confirmed": req.confirmed, **result}
 
 
 @router.post("/batch")

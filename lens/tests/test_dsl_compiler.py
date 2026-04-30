@@ -218,6 +218,21 @@ class TestCompileToSQL:
         sql, params = compile_to_sql(dsl, entity)
         assert "`created_at` >= %s" in sql
 
+    def test_count_aggregate(self):
+        entity = _make_order_entity()
+        dsl = QueryDSL(
+            entity="order",
+            filter=[FilterCondition(field="status", op="eq", value=1)],
+            aggregate="count",
+            order_by="-created_at",
+            limit=10,
+        )
+        sql, params = compile_to_sql(dsl, entity)
+        assert "SELECT COUNT(*) AS count" in sql
+        assert "ORDER BY" not in sql
+        assert "LIMIT 1" in sql
+        assert params[0] == 1
+
 
 # ── PostgreSQL 方言测试 ────────────────────────
 

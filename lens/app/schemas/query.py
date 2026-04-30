@@ -1,7 +1,7 @@
 """Lens 数据模型 — DSL 查询、业务对象定义、风控约束"""
 
 from pydantic import BaseModel, Field
-from typing import Any
+from typing import Any, Literal
 
 
 class FilterCondition(BaseModel):
@@ -25,6 +25,7 @@ class QueryDSL(BaseModel):
     entity: str
     filter: list[FilterCondition] = []
     field: list[str] | None = None
+    aggregate: Literal["count"] | None = None
     order_by: str | None = None  # 字段名，前缀 "-" 表示 DESC
     limit: int = Field(default=20, ge=1, le=100)
     time_range: TimeRange | None = None

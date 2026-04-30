@@ -88,12 +88,17 @@ export interface SchemaDiff {
 }
 
 export interface Annotation {
+  id?: string;
   database: string;
   table: string;
   column: string;
+  database_name?: string;
+  table_name?: string;
+  column_name?: string;
   semantic: string;
   source: string;
   confirmed: boolean;
+  updated_at?: string;
 }
 
 export const atlas = {
@@ -133,10 +138,21 @@ export const atlas = {
     ),
 
   // Annotations
-  listAnnotations: (database: string, table?: string) =>
-    request<{ count: number; annotations: Annotation[] }>(
-      `/api/atlas/annotations/${database}` + (table ? `?table=${table}` : "")
-    ),
+  listAnnotations: (
+    database: string,
+    opts?: { table?: string; q?: string; source?: string; confirmed?: boolean; limit?: number; offset?: number }
+  ) => {
+    const q = new URLSearchParams();
+    if (opts?.table) q.set("table", opts.table);
+    if (opts?.q) q.set("q", opts.q);
+    if (opts?.source) q.set("source", opts.source);
+    if (opts?.confirmed !== undefined) q.set("confirmed", String(opts.confirmed));
+    q.set("limit", String(opts?.limit ?? 100));
+    q.set("offset", String(opts?.offset ?? 0));
+    return request<{ count: number; total: number; limit: number; offset: number; annotations: Annotation[] }>(
+      `/api/atlas/annotations/${database}?${q.toString()}`
+    );
+  },
   pendingAnnotations: (database: string) =>
     request<{ count: number; annotations: Annotation[] }>(
       `/api/atlas/annotations/${database}/pending`
@@ -150,6 +166,11 @@ export const atlas = {
     }),
   confirmAnnotation: (data: { database: string; table: string; column: string; confirmed: boolean }) =>
     request<{ confirmed: boolean; success: boolean }>("/api/atlas/annotations/confirm", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  confirmAnnotations: (data: { annotations: Array<{ database: string; table: string; column: string }>; confirmed: boolean }) =>
+    request<{ confirmed: boolean; success: number; failed: number }>("/api/atlas/annotations/confirm-batch", {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -323,6 +344,7 @@ export interface QueryDSL {
   entity: string;
   filter?: FilterCondition[];
   field?: string[];
+  aggregate?: "count";
   order_by?: string;
   limit?: number;
   time_range?: { start: string; end: string };
