@@ -13,7 +13,6 @@ from app.services.schema_service import (
     get_table_info,
     search_metadata,
 )
-from app.services.demo_data import seed_demo
 
 router = APIRouter(prefix="/schemas", tags=["schemas"])
 
@@ -104,12 +103,6 @@ async def trigger_collect(database: str = Query("", description="留空则采集
                 for s in snapshots
             ],
         }
-
-
-@router.post("/demo")
-async def bootstrap_demo_schema():
-    """显式加载本地 demo schema 与服务，用于无业务库时验证 Atlas/Lens 页面。"""
-    return await seed_demo()
 
 
 @router.get("/search/meta")

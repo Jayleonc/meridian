@@ -13,7 +13,6 @@ from app.services.entity_service import (
     list_entity_definitions,
 )
 from app.services.entity_generator import import_from_atlas
-from app.adapters.demo_adapter import seed_demo_entities
 from app.services.query_service import execute_dsl_query, validate_dsl_query
 
 router = APIRouter(prefix="/entities", tags=["entities"])
@@ -60,12 +59,6 @@ async def validate(dsl: QueryDSL):
     """验证 DSL 但不执行"""
     result = await validate_dsl_query(dsl)
     return result.model_dump()
-
-
-@router.post("/demo")
-async def bootstrap_demo_entities():
-    """显式加载本地 demo entity，用于无业务库时验证 Lens 查询闭环。"""
-    return await seed_demo_entities()
 
 
 class ImportRequest(BaseModel):

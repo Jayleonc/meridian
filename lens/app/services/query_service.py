@@ -78,10 +78,7 @@ async def execute_dsl_query(dsl: QueryDSL) -> QueryResult:
 
     # 5. 执行查询
     cfg = get_settings().query
-    if hasattr(adapter, "execute_dsl_query"):
-        rows = await adapter.execute_dsl_query(dsl, entity)
-    else:
-        rows = await adapter.execute_readonly_query(sql, params, timeout=cfg.timeout_seconds)
+    rows = await adapter.execute_readonly_query(sql, params, timeout=cfg.timeout_seconds)
     duration_ms = int((time.monotonic() - start) * 1000)
 
     # 6. 记录查询审计

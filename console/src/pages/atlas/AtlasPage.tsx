@@ -48,7 +48,6 @@ export default function AtlasPage() {
 
   // Collecting
   const [collecting, setCollecting] = useState(false);
-  const [seedingDemo, setSeedingDemo] = useState(false);
 
   useEffect(() => {
     loadStatus();
@@ -129,24 +128,6 @@ export default function AtlasPage() {
     setCollecting(false);
   }
 
-  async function handleSeedDemo() {
-    setSeedingDemo(true);
-    try {
-      const r = await atlas.seedDemo();
-      toast("success", `Demo 已加载：${r.table_count} 张表，${r.service_count} 个服务`);
-      await loadDatabases();
-      const db = r.database;
-      setSelectedDb(db);
-      await loadTables(db);
-      await loadAnnotations(db);
-      const servicesResult = await atlas.listServices();
-      setServices(servicesResult.service);
-    } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Demo 加载失败");
-    }
-    setSeedingDemo(false);
-  }
-
   async function handleAnnotate() {
     if (!annotateDb || !annotateTable || !annotateCol || !annotateSemantic) return;
     setAnnotating(true);
@@ -220,9 +201,6 @@ export default function AtlasPage() {
             <button className="btn btn-ghost btn-sm" onClick={handleCollect} disabled={collecting}>
               {collecting ? <><span className="spinner" /> 采集中</> : "采集 Schema"}
             </button>
-            <button className="btn btn-primary btn-sm" onClick={handleSeedDemo} disabled={seedingDemo}>
-              {seedingDemo ? <><span className="spinner" /> 加载中</> : "加载 Demo"}
-            </button>
           </div>
         </div>
         <div className="page-toolbar">
@@ -279,12 +257,7 @@ export default function AtlasPage() {
                     </div>
                   )) : (
                     <div className="empty" style={{ padding: 20 }}>
-                      <div className="empty-text">
-                        还没有数据库快照。可以采集真实 Schema，或先加载本地 Demo 验证页面和 Lens 联动。
-                      </div>
-                      <button className="btn btn-primary btn-sm mt-md" onClick={handleSeedDemo} disabled={seedingDemo}>
-                        {seedingDemo ? "加载中..." : "加载本地 Demo"}
-                      </button>
+                      <div className="empty-text">还没有数据库快照，请先点击上方“采集 Schema”。</div>
                     </div>
                   )}
                 </div>

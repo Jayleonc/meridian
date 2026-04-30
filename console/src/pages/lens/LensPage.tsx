@@ -3,6 +3,7 @@ import { useApp } from "../../context/AppContext";
 import { useInvestigation } from "../../context/InvestigationContext";
 import { useQueryHistory } from "../../hooks/useQueryHistory";
 import {
+  atlas,
   lens,
   type EntitySummary,
   type EntityDetail,
@@ -19,6 +20,7 @@ export default function LensPage() {
   const [selected, setSelected] = useState<EntityDetail | null>(null);
   const [entityLoading, setEntityLoading] = useState(false);
   const [error, setError] = useState("");
+  const [atlasDatabases, setAtlasDatabases] = useState<Array<{ database: string; table_count: number }>>([]);
 
   // Query state
   const [activeEntity, setActiveEntity] = useState("");
@@ -31,9 +33,13 @@ export default function LensPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [showSql, setShowSql] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [seedingDemo, setSeedingDemo] = useState(false);
 
-  useEffect(() => { void loadEntities(); }, []);
+  useEffect(() => {
+    void loadEntities();
+    atlas.listDatabases()
+      .then((r) => setAtlasDatabases(r.databases))
+      .catch(() => setAtlasDatabases([]));
+  }, []);
 
   async function loadEntities() {
     try {
@@ -63,26 +69,6 @@ export default function LensPage() {
       toast("error", e instanceof Error ? e.message : "Import failed — is Atlas running?");
     }
     setImporting(false);
-  }
-
-  async function handleSeedDemo() {
-    setSeedingDemo(true);
-    try {
-      const r = await lens.seedDemo();
-      toast("success", `Demo entities ready: ${r.imported}`);
-      await loadEntities();
-      const first = r.entities.includes("demo_order") ? "demo_order" : r.entities[0];
-      if (first) {
-        await selectEntity(first);
-        if (first === "demo_order") {
-          setFilters([{ field: "order_id", op: "eq", value: "ORD-1001" }]);
-          setOrderBy("-updated_at");
-        }
-      }
-    } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Demo load failed");
-    }
-    setSeedingDemo(false);
   }
 
   async function handleDeleteEntity(name: string) {
@@ -220,6 +206,9 @@ export default function LensPage() {
   const sortableFields = selected
     ? fieldNames.filter((n) => selected.fields[n]?.sortable)
     : [];
+  const atlasSummary = atlasDatabases.length > 0
+    ? `Atlas has ${atlasDatabases.map((db) => `${db.database} (${db.table_count} tables)`).join(", ")}.`
+    : "";
 
   return (
     <>
@@ -235,9 +224,6 @@ export default function LensPage() {
             </button>
             <button className="btn btn-primary btn-sm" onClick={handleImportFromAtlas} disabled={importing}>
               {importing ? <><span className="spinner" /> Importing</> : "Import from Atlas"}
-            </button>
-            <button className="btn btn-primary btn-sm" onClick={handleSeedDemo} disabled={seedingDemo}>
-              {seedingDemo ? <><span className="spinner" /> Loading</> : "Load Demo"}
             </button>
           </div>
         </div>
@@ -294,14 +280,11 @@ export default function LensPage() {
               ) : (
                 <div className="empty" style={{ padding: 24 }}>
                   <div className="empty-text">
-                    {error || 'No entities. Import from Atlas for real schema, or load the local demo.'}
+                    {error || `No entities. ${atlasSummary || "Atlas schema is not loaded yet."} Click "Import from Atlas" to auto-generate query entities.`}
                   </div>
                   <div className="row gap-sm mt-md" style={{ justifyContent: "center" }}>
-                    <button className="btn btn-ghost btn-sm" onClick={handleImportFromAtlas} disabled={importing}>
-                      Import from Atlas
-                    </button>
-                    <button className="btn btn-primary btn-sm" onClick={handleSeedDemo} disabled={seedingDemo}>
-                      {seedingDemo ? "Loading..." : "Load Demo"}
+                    <button className="btn btn-primary btn-sm" onClick={handleImportFromAtlas} disabled={importing}>
+                      {importing ? "Importing..." : "Import from Atlas"}
                     </button>
                   </div>
                 </div>

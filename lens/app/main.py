@@ -10,7 +10,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.adapters import pg_adapter, registry
-from app.adapters.demo_adapter import DemoMemoryAdapter, DEMO_DATASOURCE
 from app.adapters.mysql_adapter import MySQLAdapter
 from app.api.routes.health import router as health_router
 from app.api.routes.entities import router as entities_router
@@ -26,9 +25,6 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 def _register_datasources():
     """根据配置注册业务数据源适配器"""
     settings = get_settings()
-
-    if not registry.get(DEMO_DATASOURCE):
-        registry.register(DEMO_DATASOURCE, DemoMemoryAdapter())
 
     # 多数据源配置（新格式）
     if hasattr(settings, "business_datasource") and settings.business_datasource:

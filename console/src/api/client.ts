@@ -125,11 +125,6 @@ export const atlas = {
     request<{ collected: number }>("/api/atlas/schemas/collect" + (database ? `?database=${database}` : ""), {
       method: "POST",
     }),
-  seedDemo: () =>
-    request<{ database: string; table_count: number; service_count: number; tables: string[] }>(
-      "/api/atlas/schemas/demo",
-      { method: "POST" }
-    ),
   searchMeta: (q: string) =>
     request<{ query: string; matched_table: TableInfo[]; matched_column: Array<Record<string, string>>; matched_service: ServiceInfo[] }>(
       `/api/atlas/schemas/search/meta?q=${encodeURIComponent(q)}`
@@ -362,11 +357,6 @@ export const lens = {
           overwrite: opts?.overwrite || false,
         }),
       }
-    ),
-  seedDemo: () =>
-    request<{ imported: number; skipped: number; errors: string[]; entities: string[]; datasource: string }>(
-      "/api/lens/entities/demo",
-      { method: "POST" }
     ),
   deleteEntity: (name: string) =>
     request<{ deleted: boolean; name: string }>(`/api/lens/entities/${name}`, {

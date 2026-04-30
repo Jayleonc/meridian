@@ -196,27 +196,6 @@ python3 scripts/agent_cli.py
 
 Console 本地开发同样经由 Nexus 转发后端请求，不再直接连接 Atlas / Probe / Lens。
 
-## Atlas / Lens 本地自举
-
-如果本地还没有业务 MySQL、Atlas 快照或 Lens entity，Atlas 和 Lens 页面会显示为空。可以先用 Console 里的显式 Demo 入口验证页面和链路：
-
-```text
-Atlas 页面 -> 加载 Demo
-Lens 页面 -> Load Demo -> 选择 demo_order -> Execute
-```
-
-对应 HTTP 入口：
-
-```bash
-curl -fsS -X POST http://127.0.0.1:3000/api/atlas/schemas/demo
-curl -fsS -X POST http://127.0.0.1:3000/api/lens/entities/demo
-curl -fsS -X POST http://127.0.0.1:3000/api/lens/entities/query \
-  -H 'Content-Type: application/json' \
-  -d '{"entity":"demo_order","filter":[{"field":"order_id","op":"eq","value":"ORD-1001"}],"limit":10}'
-```
-
-这个 Demo 只写入进程内缓存和 Lens 的 `demo-memory` datasource，不替代真实业务库。接真实数据时仍按正常路径走：Atlas 采集业务 MySQL schema，Lens 从 Atlas import entity，然后 Lens 通过配置的数据源执行只读 DSL 查询。
-
 ## Agent Chat
 
 Console 的 `Agent` 页面调用 Nexus 的 `/api/chat/*`。这套接口是 Meridian 自己的会话协议，不绑定 OpenAI Responses / Agents SDK。页面左侧会列出最近会话，支持从历史会话继续排障；刷新后优先恢复最近一次打开的会话。
