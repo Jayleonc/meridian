@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useApp } from "../../context/AppContext";
 import { useInvestigation } from "../../context/InvestigationContext";
 import { usePolling } from "../../hooks/usePolling";
@@ -115,6 +115,7 @@ function traceAutoHintLabel(hintTime: string, backHours: number) {
 
 export default function ProbePage() {
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const tab = (params.get("tab") as Tab) || "errors";
   const { toast } = useApp();
   const inv = useInvestigation();
@@ -399,13 +400,9 @@ export default function ProbePage() {
     }
   }
 
-  function onTraceServiceClick(svc: string) {
-    inv.push({
-      type: "service",
-      label: svc,
-      path: `/probe?tab=service&svc=${svc}`,
-      data: { service: svc },
-    });
+  function analyzeTraceWithAgent(trace: TraceSummary) {
+    const prompt = buildTraceAgentPrompt(trace);
+    navigate(`/chat?prompt=${encodeURIComponent(prompt)}&auto_send=1`);
   }
 
   const filteredServices = services.filter((svc) =>
@@ -748,7 +745,7 @@ export default function ProbePage() {
               )}
             </div>
 
-            {traceResult && <TraceView trace={traceResult} onServiceClick={onTraceServiceClick} />}
+            {traceResult && <TraceView trace={traceResult} onAnalyze={analyzeTraceWithAgent} />}
           </div>
         )}
 
@@ -769,6 +766,43 @@ export default function ProbePage() {
       </div>
     </>
   );
+}
+
+function clipTraceMessage(message: string, max = 260): string {
+  if (message.length <= max) return message;
+  return `${message.slice(0, max)}...`;
+}
+
+function buildTraceAgentPrompt(trace: TraceSummary): string {
+  const servicePath = trace.services.length > 0 ? trace.services.join(" -> ") : "未知";
+  const errors = trace.errors.slice(0, 5)
+    .map((item) => `- ${formatLogTime(item.timestamp)} [${item.service}] ${clipTraceMessage(item.message)}`)
+    .join("\n") || "- 无错误日志摘要";
+  const warns = trace.warns.slice(0, 3)
+    .map((item) => `- ${formatLogTime(item.timestamp)} [${item.service}] ${clipTraceMessage(item.message)}`)
+    .join("\n") || "- 无警告日志摘要";
+
+  return [
+    "请对这个请求链路做一次排障分析。",
+    "",
+    `request_id: ${trace.request_id}`,
+    `回看窗口: ${trace.searched_hours} 小时`,
+    `服务路径: ${servicePath}`,
+    `错误数: ${trace.error_count}`,
+    `警告数: ${trace.warn_count}`,
+    "",
+    "错误摘要:",
+    errors,
+    "",
+    "警告摘要:",
+    warns,
+    "",
+    "要求:",
+    "1. 先用 probe_search_by_request_id 重新拉取证据，include_full=true。",
+    "2. 输出关键证据列表，按服务和时间排序。",
+    "3. 给出最可能的候选原因，但不要下最终结论。",
+    "4. 给出下一步应该查哪个服务、关键词或业务数据。",
+  ].join("\n");
 }
 
 /* ════════════════════════════════════════════
@@ -893,10 +927,10 @@ function LogContextPanel({
 
 function TraceView({
   trace,
-  onServiceClick,
+  onAnalyze,
 }: {
   trace: TraceSummary;
-  onServiceClick: (svc: string) => void;
+  onAnalyze: (trace: TraceSummary) => void;
 }) {
   return (
     <div className="fade-up">
@@ -928,11 +962,14 @@ function TraceView({
         </div>
       </div>
 
-      {/* Request path — clickable services */}
+      {/* Request path */}
       <div className="card mb-md">
         <div className="card-head">
           <h3>请求路径</h3>
           <div className="row gap-sm wrap">
+            <button className="btn btn-primary btn-sm" type="button" onClick={() => onAnalyze(trace)}>
+              交给 Agent 分析
+            </button>
             <span className="badge badge-dim">
               {trace.searched_hours > 0 ? `已回看 ${trace.searched_hours} 小时` : "当前小时"}
             </span>
@@ -945,14 +982,7 @@ function TraceView({
           <div className="row gap-sm wrap">
             {trace.services.map((svc, i) => (
               <span key={svc} className="row gap-sm">
-                <span
-                  className="badge badge-teal"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => onServiceClick(svc)}
-                  title={`在 Atlas 中查看 ${svc}`}
-                >
-                  {svc}
-                </span>
+                <span className="badge badge-teal">{svc}</span>
                 {i < trace.services.length - 1 && (
                   <span style={{ color: "var(--t4)", fontSize: 11 }}>{"\u2192"}</span>
                 )}
@@ -982,9 +1012,7 @@ function TraceView({
               <div key={i} className="log-line">
                 <span className="log-ts">{formatLogTime(e.timestamp)}</span>
                 <span className="log-level ERR">ERR</span>
-                <span className="log-svc" style={{ cursor: "pointer" }} onClick={() => onServiceClick(e.service)}>
-                  [{e.service}]
-                </span>
+                <span className="log-svc">[{e.service}]</span>
                 <span className="log-msg">{e.message}</span>
               </div>
             ))}
@@ -1022,9 +1050,7 @@ function TraceView({
               <div key={i} className="log-line">
                 <span className="log-ts">{formatLogTime(t.timestamp)}</span>
                 <span className={`log-level ${t.level}`}>{t.level}</span>
-                <span className="log-svc" style={{ cursor: "pointer" }} onClick={() => onServiceClick(t.service)}>
-                  [{t.service}]
-                </span>
+                <span className="log-svc">[{t.service}]</span>
                 <span className="log-msg">{t.message}</span>
               </div>
             ))}

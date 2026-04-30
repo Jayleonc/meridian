@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   chat,
   type ChatConfig,
@@ -84,6 +85,7 @@ function mergeSessionSummary(
 
 export default function ChatPage() {
   const { toast } = useApp();
+  const [params, setParams] = useSearchParams();
   const [config, setConfig] = useState<ChatConfig | null>(null);
   const [session, setSession] = useState<ChatSession | null>(null);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
@@ -93,6 +95,7 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const threadRef = useRef<HTMLDivElement | null>(null);
   const sendingRef = useRef(false);
+  const importedPromptRef = useRef("");
 
   const modelLabel = useMemo(() => {
     if (!config) return "checking";
@@ -235,6 +238,25 @@ export default function ChatPage() {
       behavior: "smooth",
     });
   }, [session?.messages.length, sending]);
+
+  useEffect(() => {
+    const prompt = params.get("prompt") || "";
+    if (!prompt || loading || !session || importedPromptRef.current === prompt) return;
+
+    importedPromptRef.current = prompt;
+    const nextParams = new URLSearchParams(params);
+    const autoSend = nextParams.get("auto_send") === "1";
+    nextParams.delete("prompt");
+    nextParams.delete("auto_send");
+    setParams(nextParams, { replace: true });
+
+    if (autoSend) {
+      void send(prompt);
+    } else {
+      setInput(prompt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, session?.id, params]);
 
   async function send(text?: string) {
     const content = (text ?? input).trim();
