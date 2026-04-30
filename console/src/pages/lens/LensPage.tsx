@@ -237,6 +237,7 @@ export default function LensPage() {
         .some((value) => value.toLowerCase().includes(query));
     });
   }, [entities, entityQuery, entityDatabase]);
+  const hasEffectiveFilters = filters.some((f) => f.field && f.value.trim());
 
   return (
     <>
@@ -493,7 +494,7 @@ export default function LensPage() {
                       Count
                     </button>
                     {queryMode === "count" && (
-                      <span className="badge badge-dim">只统计当前筛选条件命中的行数，不返回明细字段</span>
+                      <span className="badge badge-dim">统计当前实体行数，可选筛选条件，不返回明细字段</span>
                     )}
                   </div>
 
@@ -637,7 +638,9 @@ export default function LensPage() {
                     {result.success && queryMode === "count" ? (
                       <div className="stat" style={{ textAlign: "left", padding: "18px 20px" }}>
                         <div className="stat-val teal">{result.count?.toLocaleString()}</div>
-                        <div className="stat-label">当前实体与筛选条件命中的行数</div>
+                        <div className="stat-label">
+                          {hasEffectiveFilters ? "当前实体与筛选条件命中的行数" : "当前实体的行数"}
+                        </div>
                       </div>
                     ) : result.success && result.data && result.data.length > 0 ? (
                       <table className="dtable">

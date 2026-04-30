@@ -116,15 +116,16 @@ def validate_dsl(dsl: QueryDSL, entity: EntityDefinition) -> ValidationResult:
     warnings = []
     cfg = get_settings().query
 
-    # 1. 检查是否有筛选条件
-    if cfg.require_filter and not dsl.filter:
+    # 1. 明细查询按配置要求筛选条件；count 允许无筛选，表示统计当前实体。
+    if cfg.require_filter and dsl.aggregate != "count" and not dsl.filter:
         errors.append("必须指定至少一个筛选条件（filter）")
 
-    # 2. 检查必填筛选字段
+    # 2. 检查必填筛选字段。count 不要求必填筛选字段。
     filter_fields = {f.field for f in dsl.filter}
-    for req_field in entity.constraint.required_filter_fields:
-        if req_field not in filter_fields:
-            errors.append(f"必须包含筛选字段: {req_field}")
+    if dsl.aggregate != "count":
+        for req_field in entity.constraint.required_filter_fields:
+            if req_field not in filter_fields:
+                errors.append(f"必须包含筛选字段: {req_field}")
 
     # 3. 检查字段是否存在
     for fc in dsl.filter:
@@ -344,6 +345,8 @@ def _build_time_range(
         if dsl.time_range.end:
             parts.append(f"{qcol} <= {next_ph()}")
             params.append(dsl.time_range.end)
+    elif dsl.aggregate == "count":
+        return parts, params
     else:
         days = entity.constraint.default_time_range_days or query_cfg.default_time_range_days
         start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")

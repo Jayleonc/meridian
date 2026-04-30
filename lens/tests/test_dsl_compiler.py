@@ -1,7 +1,5 @@
 """DSL 编译器单元测试"""
 
-import pytest
-
 from app.schemas.query import (
     EntityConstraint,
     EntityDefinition,
@@ -74,6 +72,13 @@ class TestValidateDSL:
         result = validate_dsl(dsl, entity)
         assert result.valid is False
         assert any("筛选条件" in e for e in result.errors)
+
+    def test_count_allows_missing_filter(self):
+        entity = _make_order_entity()
+        dsl = QueryDSL(entity="order", filter=[], aggregate="count", limit=1)
+        result = validate_dsl(dsl, entity)
+        assert result.valid is True
+        assert result.errors == []
 
     def test_unknown_filter_field(self):
         entity = _make_order_entity()
@@ -230,8 +235,16 @@ class TestCompileToSQL:
         sql, params = compile_to_sql(dsl, entity)
         assert "SELECT COUNT(*) AS count" in sql
         assert "ORDER BY" not in sql
+        assert "`created_at`" not in sql
         assert "LIMIT 1" in sql
-        assert params[0] == 1
+        assert params == (1,)
+
+    def test_count_aggregate_without_filter(self):
+        entity = _make_order_entity()
+        dsl = QueryDSL(entity="order", filter=[], aggregate="count", limit=10)
+        sql, params = compile_to_sql(dsl, entity)
+        assert sql == "SELECT COUNT(*) AS count FROM `test`.`order` LIMIT 1"
+        assert params == ()
 
 
 # ── PostgreSQL 方言测试 ────────────────────────
