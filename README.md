@@ -137,6 +137,16 @@ make dev-server-prebuilt
 ./scripts/dev-server.sh --skip-console-build
 ```
 
+如果希望在开发服务器后台运行，不占用当前 SSH 会话：
+
+```bash
+make dev-server-bg
+make dev-server-status
+make dev-server-stop
+```
+
+`dev-server-bg` 会复用预构建 Console 包，主进程 PID 写入 `.meridian/run/dev-server.pid`，外层输出写入 `.meridian/logs/dev-server.out`。这比直接后台运行 `make start` 更适合开发服务器，因为它仍然使用 `dev-server.sh` 的单端口暴露、内部服务回环绑定、本地配置优先级和 DevOps 日志目录。
+
 启动后，`dev-server.sh` 会把各服务输出写入：
 
 ```text
