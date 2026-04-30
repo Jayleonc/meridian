@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useApp } from "../../context/AppContext";
 import { useInvestigation } from "../../context/InvestigationContext";
@@ -8,6 +8,7 @@ import { formatLogTime } from "../../utils/time";
 import { serviceSourceLabel } from "../../utils/serviceLabels";
 
 type Tab = "errors" | "search" | "service" | "trace";
+type LogSortOrder = "desc" | "asc";
 
 const TRACE_BACK_OPTIONS = [0, 1, 2, 4, 8, 12, 24, 48, 72];
 const TRACE_MAX_BACK_HOURS = 72;
@@ -113,6 +114,61 @@ function traceAutoHintLabel(hintTime: string, backHours: number) {
   return `${age}，${glogLabel}`;
 }
 
+function logItemFingerprint(item: LogItem) {
+  return [
+    item.timestamp,
+    item.level,
+    item.service || "",
+    item.request_id || "",
+    item.file || item.source || "",
+    item.line_number || "",
+    item.text?.slice(0, 120) || "",
+  ].join(":");
+}
+
+function logTimestampMs(timestamp?: string) {
+  if (!timestamp) return 0;
+
+  const brick = timestamp.match(/^(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (brick) {
+    const now = new Date();
+    return new Date(
+      now.getFullYear(),
+      Number(brick[1]) - 1,
+      Number(brick[2]),
+      Number(brick[3]),
+      Number(brick[4]),
+      Number(brick[5] ?? 0)
+    ).getTime();
+  }
+
+  const clockOnly = timestamp.match(/^(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (clockOnly) {
+    const now = new Date();
+    return new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      Number(clockOnly[1]),
+      Number(clockOnly[2]),
+      Number(clockOnly[3] ?? 0)
+    ).getTime();
+  }
+
+  const parsed = Date.parse(timestamp);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function sortLogItems(items: LogItem[], order: LogSortOrder) {
+  return items
+    .map((item, index) => ({ item, index, ts: logTimestampMs(item.timestamp) }))
+    .sort((a, b) => {
+      if (a.ts !== b.ts) return order === "desc" ? b.ts - a.ts : a.ts - b.ts;
+      return a.index - b.index;
+    })
+    .map(({ item }) => item);
+}
+
 export default function ProbePage() {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
@@ -128,6 +184,7 @@ export default function ProbePage() {
   // ── Error feed (live polling) ──
   const [hoursBack, setHoursBack] = useState(1);
   const [errorLimit, setErrorLimit] = useState(200);
+  const [errorSortOrder, setErrorSortOrder] = useState<LogSortOrder>("desc");
   const prevIds = useRef<Set<string>>(new Set());
 
   const errorFetcher = useCallback(
@@ -139,31 +196,40 @@ export default function ProbePage() {
   );
 
   // Track new items for animation
-  const [newItemIds, setNewItemIds] = useState<Set<number>>(new Set());
+  const [newItemKeys, setNewItemKeys] = useState<Set<string>>(new Set());
   useEffect(() => {
     if (!errorData) return;
-    const fresh = new Set<number>();
-    errorData.items.forEach((item, i) => {
-      const key = `${item.timestamp}:${item.text?.slice(0, 40)}`;
-      if (!prevIds.current.has(key)) fresh.add(i);
+    const fresh = new Set<string>();
+    errorData.items.forEach((item) => {
+      const key = logItemFingerprint(item);
+      if (!prevIds.current.has(key)) fresh.add(key);
     });
     if (fresh.size > 0 && prevIds.current.size > 0) {
-      setNewItemIds(fresh);
-      setTimeout(() => setNewItemIds(new Set()), 1200);
+      setNewItemKeys(fresh);
+      setTimeout(() => setNewItemKeys(new Set()), 1200);
     }
     const nextSet = new Set<string>();
     errorData.items.forEach((item) => {
-      nextSet.add(`${item.timestamp}:${item.text?.slice(0, 40)}`);
+      nextSet.add(logItemFingerprint(item));
     });
     prevIds.current = nextSet;
   }, [errorData]);
+  const errorItems = useMemo(
+    () => sortLogItems(errorData?.items ?? [], errorSortOrder),
+    [errorData, errorSortOrder]
+  );
 
   // ── Search ──
   const [keyword, setKeyword] = useState("");
   const [level, setLevel] = useState("");
   const [searchLimit, setSearchLimit] = useState(200);
+  const [searchSortOrder, setSearchSortOrder] = useState<LogSortOrder>("desc");
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
+  const searchItems = useMemo(
+    () => sortLogItems(searchResult?.items ?? [], searchSortOrder),
+    [searchResult, searchSortOrder]
+  );
 
   async function handleSearch() {
     if (!keyword.trim()) return;
@@ -188,12 +254,17 @@ export default function ProbePage() {
   const [selectedService, setSelectedService] = useState(selectedServiceParam);
   const [serviceHoursBack, setServiceHoursBack] = useState(1);
   const [serviceLimit, setServiceLimit] = useState(200);
+  const [serviceSortOrder, setServiceSortOrder] = useState<LogSortOrder>("desc");
   const [serviceLevel, setServiceLevel] = useState("");
   const [serviceKeyword, setServiceKeyword] = useState("");
   const [serviceExcludeNoise, setServiceExcludeNoise] = useState(true);
   const [serviceResult, setServiceResult] = useState<SearchResult | null>(null);
   const [serviceLoading, setServiceLoading] = useState(false);
   const [serviceSource, setServiceSource] = useState("");
+  const serviceItems = useMemo(
+    () => sortLogItems(serviceResult?.items ?? [], serviceSortOrder),
+    [serviceResult, serviceSortOrder]
+  );
 
   async function loadServices() {
     try {
@@ -356,8 +427,8 @@ export default function ProbePage() {
     return [`# ${data.file}`, ...before, ...match, ...after].join("\n");
   }
 
-  function copyLogs(result: SearchResult | null, label: string) {
-    const lines = result?.items.map(formatLogItem) ?? [];
+  function copyLogItems(items: LogItem[], label: string) {
+    const lines = items.map(formatLogItem);
     if (lines.length === 0) return;
     void copyText(lines.join("\n"), label);
   }
@@ -472,6 +543,10 @@ export default function ProbePage() {
               <select className="input" style={{ width: 130 }} value={errorLimit} onChange={(e) => setErrorLimit(Number(e.target.value))}>
                 {[50, 100, 200, 500].map((n) => <option key={n} value={n}>最新 {n} 条</option>)}
               </select>
+              <select className="input" style={{ width: 140 }} value={errorSortOrder} onChange={(e) => setErrorSortOrder(e.target.value as LogSortOrder)}>
+                <option value="desc">最新在前</option>
+                <option value="asc">最早在前</option>
+              </select>
               {errorLoading && <span className="badge badge-amber"><span className="spinner" /> 刷新中</span>}
               {errorData && (
                 <>
@@ -488,12 +563,12 @@ export default function ProbePage() {
 
             <div className="card">
               <div className="card-body flush" style={{ maxHeight: "calc(100vh - 260px)", overflowY: "auto" }}>
-                {(errorData?.items ?? []).length > 0 ? (
-                  (errorData?.items ?? []).map((item, i) => (
+                {errorItems.length > 0 ? (
+                  errorItems.map((item, i) => (
                     <LogLineView
-                      key={i}
+                      key={`${logItemFingerprint(item)}:${i}`}
                       item={item}
-                      isNew={newItemIds.has(i)}
+                      isNew={newItemKeys.has(logItemFingerprint(item))}
                       onOpenContext={openContext}
                       onTrace={traceLog}
                       onCopy={(target) => copyText(formatLogItem(target), "单条日志")}
@@ -533,6 +608,10 @@ export default function ProbePage() {
               <select className="input" style={{ width: 130 }} value={searchLimit} onChange={(e) => setSearchLimit(Number(e.target.value))}>
                 {[50, 100, 200, 500].map((n) => <option key={n} value={n}>返回 {n} 条</option>)}
               </select>
+              <select className="input" style={{ width: 140 }} value={searchSortOrder} onChange={(e) => setSearchSortOrder(e.target.value as LogSortOrder)}>
+                <option value="desc">最新在前</option>
+                <option value="asc">最早在前</option>
+              </select>
               <button className="btn btn-primary" onClick={handleSearch} disabled={searchLoading || !keyword.trim()}>
                 {searchLoading ? <><span className="spinner" /> 搜索中</> : "搜索"}
               </button>
@@ -542,7 +621,7 @@ export default function ProbePage() {
               <>
                 <div className="row gap-sm mb-md">
                   <span className="badge badge-teal">命中 {searchResult.summary.total_matches} 条</span>
-                  <button className="btn btn-ghost btn-sm" onClick={() => copyLogs(searchResult, "搜索结果")} disabled={!searchResult.items.length}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => copyLogItems(searchItems, "搜索结果")} disabled={!searchItems.length}>
                     复制结果
                   </button>
                   {searchResult.summary.truncated && <span className="badge badge-warn">已到返回上限</span>}
@@ -550,9 +629,9 @@ export default function ProbePage() {
 
                 <div className="card">
                   <div className="card-body flush" style={{ maxHeight: "calc(100vh - 300px)", overflowY: "auto" }}>
-                    {searchResult.items.map((item, i) => (
+                    {searchItems.map((item, i) => (
                       <LogLineView
-                        key={i}
+                        key={`${logItemFingerprint(item)}:${i}`}
                         item={item}
                         onOpenContext={openContext}
                         onTrace={traceLog}
@@ -661,6 +740,15 @@ export default function ProbePage() {
                 >
                   {[50, 100, 200, 500].map((n) => <option key={n} value={n}>返回 {n} 条</option>)}
                 </select>
+                <select
+                  className="input"
+                  style={{ width: 140 }}
+                  value={serviceSortOrder}
+                  onChange={(e) => setServiceSortOrder(e.target.value as LogSortOrder)}
+                >
+                  <option value="desc">最新在前</option>
+                  <option value="asc">最早在前</option>
+                </select>
                 <input
                   className="input"
                   style={{ minWidth: 180 }}
@@ -672,7 +760,7 @@ export default function ProbePage() {
                 <button className="btn btn-primary" onClick={() => loadServiceLogs()} disabled={serviceLoading || !selectedService.trim()}>
                   {serviceLoading ? <><span className="spinner" /> 加载中</> : "查看日志"}
                 </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => copyLogs(serviceResult, "服务日志")} disabled={!serviceResult?.items.length}>
+                <button className="btn btn-ghost btn-sm" onClick={() => copyLogItems(serviceItems, "服务日志")} disabled={!serviceItems.length}>
                   复制日志
                 </button>
                 <label className="check-control">
@@ -702,10 +790,10 @@ export default function ProbePage() {
                   </div>
                   <div className="card">
                     <div className="card-body flush" style={{ maxHeight: "calc(100vh - 330px)", overflowY: "auto" }}>
-                      {serviceResult.items.length > 0 ? (
-                        serviceResult.items.map((item, i) => (
+                      {serviceItems.length > 0 ? (
+                        serviceItems.map((item, i) => (
                           <LogLineView
-                            key={i}
+                            key={`${logItemFingerprint(item)}:${i}`}
                             item={item}
                             onOpenContext={openContext}
                             onTrace={traceLog}
