@@ -7,6 +7,7 @@ import AtlasPage from "./pages/atlas/AtlasPage";
 import ProbePage from "./pages/probe/ProbePage";
 import LensPage from "./pages/lens/LensPage";
 import ChatPage from "./pages/chat/ChatPage";
+import NexusPage from "./pages/nexus/NexusPage";
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
               <Route path="atlas" element={<AtlasPage />} />
               <Route path="probe" element={<ProbePage />} />
               <Route path="lens" element={<LensPage />} />
+              <Route path="nexus" element={<NexusPage />} />
             </Route>
           </Routes>
         </InvestigationProvider>

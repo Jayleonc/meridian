@@ -34,6 +34,7 @@ export default function CommandPalette() {
       { id: "atlas", icon: "\u2B22", label: "Atlas — 元数据", hint: "/atlas", action: () => navigate("/atlas") },
       { id: "probe", icon: "\u25CE", label: "Probe — 日志", hint: "/probe", action: () => navigate("/probe") },
       { id: "lens", icon: "\u25C8", label: "Lens — 数据查询", hint: "/lens", action: () => navigate("/lens") },
+      { id: "nexus", icon: "\u25A6", label: "Nexus — Registry", hint: "/nexus", action: () => navigate("/nexus") },
       { id: "search", icon: "\u2315", label: "搜索日志", hint: "Probe", action: () => navigate("/probe?tab=search") },
       { id: "errors", icon: "\u26A0", label: "最近错误", hint: "Probe", action: () => navigate("/probe?tab=errors") },
       { id: "trace", icon: "\u21C4", label: "追踪请求", hint: "Probe", action: () => navigate("/probe?tab=trace") },

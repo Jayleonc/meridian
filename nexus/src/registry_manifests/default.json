@@ -1,0 +1,383 @@
+{
+  "version": "0.2.0",
+  "services": [
+    {
+      "name": "atlas",
+      "version": "0.1.0",
+      "base_url_env": "ATLAS_URL",
+      "default_base_url": "http://127.0.0.1:3001",
+      "health": "/health",
+      "api_prefix": "/api",
+      "mcp": {
+        "sse": "/mcp/sse",
+        "messages": "/mcp/messages/",
+        "stream": "/mcp/stream/"
+      },
+      "tools": [
+        {
+          "name": "atlas.health.v1",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "description": "Check Atlas health through Nexus managed adapter pipeline.",
+          "method": "GET",
+          "path": "/health",
+          "risk": "read",
+          "required_scopes": ["read:health"],
+          "input_schema": {
+            "type": "object",
+            "properties": {}
+          },
+          "exposure": {
+            "mcp": true,
+            "agent": false
+          },
+          "approval": {
+            "state": "approved",
+            "approved_by": "system",
+            "reason": "read-only health check"
+          },
+          "timeout_seconds": 5,
+          "downstream_timeout_seconds": 5,
+          "max_response_bytes": 4000,
+          "sensitive_fields": []
+        },
+        {
+          "name": "atlas.list_services",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "chat_name": "atlas_list_services",
+          "description": "List Atlas service metadata.",
+          "method": "GET",
+          "path": "/api/services",
+          "risk": "read",
+          "required_scopes": ["read:schema"],
+          "exposure": {
+            "mcp": true,
+            "agent": true
+          }
+        },
+        {
+          "name": "atlas.search_meta",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "chat_name": "atlas_search_meta",
+          "description": "Search Atlas metadata.",
+          "method": "GET",
+          "path": "/api/schemas/search/meta",
+          "risk": "read",
+          "required_scopes": ["read:schema"],
+          "input_schema": {
+            "type": "object",
+            "required": ["q"],
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            }
+          },
+          "exposure": {
+            "mcp": true,
+            "agent": true
+          }
+        },
+        {
+          "name": "atlas.get_table",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "chat_name": "atlas_get_table",
+          "description": "Get Atlas table details.",
+          "method": "GET",
+          "path": "/api/schemas/{database}/tables/{table}",
+          "risk": "read",
+          "required_scopes": ["read:schema"],
+          "input_schema": {
+            "type": "object",
+            "required": ["database", "table"],
+            "properties": {
+              "database": {
+                "type": "string"
+              },
+              "table": {
+                "type": "string"
+              }
+            }
+          },
+          "exposure": {
+            "mcp": true,
+            "agent": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "probe",
+      "version": "0.2.0",
+      "base_url_env": "PROBE_URL",
+      "default_base_url": "http://127.0.0.1:3002",
+      "health": "/health",
+      "api_prefix": "/api/logs",
+      "mcp": {
+        "sse": "/mcp/sse",
+        "messages": "/mcp/messages/",
+        "stream": "/mcp/stream/"
+      },
+      "tools": [
+        {
+          "name": "probe.search_by_request_id",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "chat_name": "probe_search_by_request_id",
+          "description": "Trace logs by request_id.",
+          "method": "GET",
+          "path": "/api/logs/trace/{request_id}",
+          "risk": "read_logs",
+          "required_scopes": ["read:logs"],
+          "exposure": {
+            "mcp": true,
+            "agent": true
+          },
+          "timeout_seconds": 30,
+          "max_response_bytes": 24000,
+          "sensitive_fields": ["token", "password", "secret", "phone"]
+        },
+        {
+          "name": "probe.search_logs",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "chat_name": "probe_search_logs",
+          "description": "Search logs by keyword.",
+          "method": "POST",
+          "path": "/api/logs/search",
+          "risk": "read_logs",
+          "required_scopes": ["read:logs"],
+          "exposure": {
+            "mcp": true,
+            "agent": true
+          },
+          "timeout_seconds": 30,
+          "max_response_bytes": 16000,
+          "sensitive_fields": ["token", "password", "secret", "phone"]
+        },
+        {
+          "name": "probe.tail_errors",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "chat_name": "probe_tail_errors",
+          "description": "Tail recent error logs.",
+          "method": "GET",
+          "path": "/api/logs/errors",
+          "risk": "read_logs",
+          "required_scopes": ["read:logs"],
+          "exposure": {
+            "mcp": true,
+            "agent": true
+          },
+          "max_response_bytes": 16000,
+          "sensitive_fields": ["token", "password", "secret", "phone"]
+        },
+        {
+          "name": "probe.tail_service_logs",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "chat_name": "probe_tail_service_logs",
+          "description": "Tail recent logs for one service.",
+          "method": "GET",
+          "path": "/api/logs/services/{service}/tail",
+          "risk": "read_logs",
+          "required_scopes": ["read:logs"],
+          "exposure": {
+            "mcp": true,
+            "agent": true
+          },
+          "max_response_bytes": 16000,
+          "sensitive_fields": ["token", "password", "secret", "phone"]
+        },
+        {
+          "name": "probe.list_services",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "chat_name": "probe_list_services",
+          "description": "List services observable by Probe.",
+          "method": "GET",
+          "path": "/api/logs/services",
+          "risk": "read_logs",
+          "required_scopes": ["read:logs"],
+          "exposure": {
+            "mcp": true,
+            "agent": true
+          },
+          "max_response_bytes": 12000
+        },
+        {
+          "name": "probe.context_around_match",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "chat_name": "probe_context_around_match",
+          "description": "Read context around one log match.",
+          "method": "GET",
+          "path": "/api/logs/context",
+          "risk": "read_logs",
+          "required_scopes": ["read:logs"],
+          "exposure": {
+            "mcp": true,
+            "agent": true
+          },
+          "max_response_bytes": 16000,
+          "sensitive_fields": ["token", "password", "secret", "phone"]
+        },
+        {
+          "name": "probe.search_ops_logs",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "chat_name": "probe_search_ops_logs",
+          "description": "Search ops logs across allowlisted hosts.",
+          "method": "POST",
+          "path": "/api/logs/ops/search",
+          "risk": "read_logs",
+          "required_scopes": ["read:logs"],
+          "exposure": {
+            "mcp": true,
+            "agent": true
+          },
+          "timeout_seconds": 30,
+          "max_response_bytes": 20000,
+          "sensitive_fields": ["token", "password", "secret", "phone"],
+          "sandbox": {
+            "required": true,
+            "notes": "Validate host allowlist and partial failure before agent exposure."
+          }
+        }
+      ]
+    },
+    {
+      "name": "lens",
+      "version": "0.1.0",
+      "base_url_env": "LENS_URL",
+      "default_base_url": "http://127.0.0.1:3003",
+      "health": "/health",
+      "api_prefix": "/api",
+      "mcp": {
+        "sse": "/mcp/sse",
+        "messages": "/mcp/messages/",
+        "stream": "/mcp/stream/"
+      },
+      "tools": [
+        {
+          "name": "lens.list_entities",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "chat_name": "lens_list_entities",
+          "description": "List Lens business entities.",
+          "method": "GET",
+          "path": "/api/entities",
+          "risk": "read_business_data",
+          "required_scopes": ["read:business"],
+          "exposure": {
+            "mcp": true,
+            "agent": true
+          },
+          "max_response_bytes": 16000
+        },
+        {
+          "name": "lens.describe_entity",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "chat_name": "lens_describe_entity",
+          "description": "Describe one Lens business entity.",
+          "method": "GET",
+          "path": "/api/entities/{entity}",
+          "risk": "read_business_data",
+          "required_scopes": ["read:business"],
+          "input_schema": {
+            "type": "object",
+            "required": ["entity"],
+            "properties": {
+              "entity": {
+                "type": "string"
+              }
+            }
+          },
+          "exposure": {
+            "mcp": true,
+            "agent": true
+          },
+          "max_response_bytes": 16000
+        },
+        {
+          "name": "lens.query",
+          "version": "v1",
+          "status": "approved",
+          "adapter": "http",
+          "chat_name": "lens_query",
+          "description": "Execute Lens read-only DSL query.",
+          "method": "POST",
+          "path": "/api/entities/query",
+          "risk": "read_business_data",
+          "required_scopes": ["read:business"],
+          "input_schema": {
+            "type": "object",
+            "required": ["entity"],
+            "properties": {
+              "entity": {
+                "type": "string"
+              },
+              "filter": {
+                "type": "array"
+              },
+              "field": {
+                "type": "array"
+              },
+              "aggregate": {
+                "type": "string"
+              },
+              "order_by": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "integer",
+                "default": 20
+              },
+              "time_range": {
+                "type": "object"
+              }
+            }
+          },
+          "exposure": {
+            "mcp": true,
+            "agent": true
+          },
+          "timeout_seconds": 30,
+          "max_response_bytes": 20000,
+          "sensitive_fields": ["phone", "mobile", "id_card", "token"]
+        }
+      ]
+    },
+    {
+      "name": "trace",
+      "version": "0.1.0",
+      "base_url_env": "TRACE_URL",
+      "default_base_url": "http://127.0.0.1:3004",
+      "health": "/health",
+      "api_prefix": "/api",
+      "mcp": {
+        "sse": "/mcp/sse",
+        "messages": "/mcp/messages/",
+        "stream": "/mcp/stream/"
+      },
+      "tools": []
+    }
+  ]
+}

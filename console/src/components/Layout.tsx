@@ -10,6 +10,8 @@ const NAV = [
   { to: "/atlas", icon: "\u2B22", label: "Atlas", svc: "atlas" as const },
   { to: "/probe", icon: "\u25CE", label: "Probe", svc: "probe" as const },
   { to: "/lens", icon: "\u25C8", label: "Lens", svc: "lens" as const },
+  { group: "平台" },
+  { to: "/nexus", icon: "\u25A6", label: "Nexus" },
 ];
 
 export default function Layout() {

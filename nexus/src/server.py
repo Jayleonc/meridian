@@ -27,12 +27,23 @@ from src.agent import create_chat_router
 from src.agent.tools import validate_tool_args
 from src.agent.sessions import HybridSessionStore
 from src import devops
+from src.registry import load_tool_registry
+from src.tool_gateway import ToolGateway
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 VERSION = "0.1.0"
 DEFAULT_TIMEOUT = float(os.getenv("NEXUS_SERVICE_TIMEOUT", "30"))
+TOOL_EXPOSURE_POLICY: dict[str, Any] = {
+    "mode": "controlled_gateway",
+    "transparent_downstream_mcp": False,
+    "source": "nexus_registry_allowlist",
+    "description": (
+        "Nexus exposes only named, constrained tools declared by Nexus. "
+        "Downstream MCP tools are not automatically or transparently exposed."
+    ),
+}
 RESERVED_FRONTEND_PREFIXES = {
     "api",
     "svc",
@@ -42,86 +53,10 @@ RESERVED_FRONTEND_PREFIXES = {
 }
 
 
-def _base_url(env_name: str, default: str) -> str:
-    return os.getenv(env_name, default).rstrip("/")
-
-
-PROBE_URL = _base_url("PROBE_URL", "http://127.0.0.1:3002")
-ATLAS_URL = _base_url("ATLAS_URL", "http://127.0.0.1:3001")
-LENS_URL = _base_url("LENS_URL", "http://127.0.0.1:3003")
-TRACE_URL = _base_url("TRACE_URL", "http://127.0.0.1:3004")
 chat_session_store = HybridSessionStore()
-
-_registry: dict[str, dict[str, Any]] = {
-    "atlas": {
-        "name": "atlas",
-        "version": "0.1.0",
-        "base_url": ATLAS_URL,
-        "health": "/health",
-        "api_prefix": "/api",
-        "mcp": {
-            "sse": "/mcp/sse",
-            "messages": "/mcp/messages/",
-            "stream": "/mcp/stream/",
-        },
-        "tools": [
-            "atlas.list_services",
-            "atlas.search_meta",
-            "atlas.get_table",
-        ],
-    },
-    "probe": {
-        "name": "probe",
-        "version": "0.2.0",
-        "base_url": PROBE_URL,
-        "health": "/health",
-        "api_prefix": "/api/logs",
-        "mcp": {
-            "sse": "/mcp/sse",
-            "messages": "/mcp/messages/",
-            "stream": "/mcp/stream/",
-        },
-        "tools": [
-            "probe.search_by_request_id",
-            "probe.search_logs",
-            "probe.tail_errors",
-            "probe.tail_service_logs",
-            "probe.list_services",
-            "probe.context_around_match",
-            "probe.search_ops_logs",
-        ],
-    },
-    "lens": {
-        "name": "lens",
-        "version": "0.1.0",
-        "base_url": LENS_URL,
-        "health": "/health",
-        "api_prefix": "/api",
-        "mcp": {
-            "sse": "/mcp/sse",
-            "messages": "/mcp/messages/",
-            "stream": "/mcp/stream/",
-        },
-        "tools": [
-            "lens.list_entities",
-            "lens.describe_entity",
-            "lens.query",
-        ],
-    },
-    "trace": {
-        "name": "trace",
-        "version": "0.1.0",
-        "base_url": TRACE_URL,
-        "health": "/health",
-        "api_prefix": "/api",
-        "mcp": {
-            "sse": "/mcp/sse",
-            "messages": "/mcp/messages/",
-            "stream": "/mcp/stream/",
-        },
-        "tools": [],
-    }
-}
+_registry = load_tool_registry()
+_gateway = ToolGateway(_registry)
+_dynamic_tools_registered: list[str] = []
 
 mcp = FastMCP("nexus")
 sse_transport = SseServerTransport("/mcp/messages/")
@@ -161,6 +96,7 @@ def _nexus_info() -> dict[str, Any]:
     return {
         "name": "nexus",
         "version": VERSION,
+        "tool_exposure": TOOL_EXPOSURE_POLICY,
         "mcp_sse": "/mcp/sse",
         "mcp_stream": "/mcp/stream/",
         "health": "/health",
@@ -187,6 +123,24 @@ def _nexus_info() -> dict[str, Any]:
                 "devops.get_chat_session",
             ],
         },
+    }
+
+
+def _registry_payload() -> dict[str, Any]:
+    services: list[dict[str, Any]] = []
+    for service in _registry.values():
+        item = dict(service)
+        item["mcp"] = dict(service["mcp"])
+        item["tools"] = list(service["tools"])
+        item["tool_exposure"] = {
+            "source": TOOL_EXPOSURE_POLICY["source"],
+            "transparent_downstream_mcp": TOOL_EXPOSURE_POLICY["transparent_downstream_mcp"],
+        }
+        services.append(item)
+    return {
+        "tool_exposure": TOOL_EXPOSURE_POLICY,
+        "dynamic_tools_registered": list(_dynamic_tools_registered),
+        "service": services,
     }
 
 
@@ -969,6 +923,9 @@ async def devops_get_chat_session(session_id: str) -> str:
     return _json(session.model_dump(mode="json"))
 
 
+_dynamic_tools_registered = _gateway.register_dynamic_tools(mcp)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Meridian Nexus",
@@ -1001,7 +958,21 @@ def create_app() -> FastAPI:
 
     @app.get("/registry")
     async def registry():
-        return {"service": list(_registry.values())}
+        return _registry_payload()
+
+    @app.get("/api/registry/status")
+    async def registry_status():
+        return {
+            "tool_exposure": TOOL_EXPOSURE_POLICY,
+            "dynamic_tools_registered": list(_dynamic_tools_registered),
+            "manifest_tools": sorted(_gateway.manifests.keys()),
+            "audit_records": len(_gateway.audit_records),
+            "reload": {
+                "enabled": os.getenv("NEXUS_REGISTRY_RELOAD_ENABLED", "false").lower() == "true",
+                "strategy": "restart_or_additive_reload",
+                "note": "FastMCP can add new tool names at runtime; existing tool replacement requires restart.",
+            },
+        }
 
     @app.get("/api/devops/status")
     async def devops_status_api():

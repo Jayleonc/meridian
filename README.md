@@ -12,7 +12,7 @@ MCP（Model Context Protocol）驱动的智能运维观测平台。
 | **probe** | 日志观测 MCP — 日志采集、搜索与分析 |
 | **lens** | 数据查询 MCP — DSL 风控规则引擎 |
 | **trace** | 链路关联 MCP — 分布式追踪与链路分析 |
-| **nexus** | MCP 网关 — 请求路由与协议转发 |
+| **nexus** | MCP 网关 — 统一入口、受控工具面与服务代理 |
 | **forge** | MCP Builder — MCP 服务构建工具 |
 | **codex** | 诊断知识库 — 故障模式与解决方案 |
 | **console** | React 前端 — 可视化控制台与 Agent 交互入口 |
@@ -61,6 +61,14 @@ http://<dev-server>:3000
 ```
 
 Console 静态资源由 Nexus 托管，Console 的所有后端请求仍走 `/api/*`、`/svc/*`、`/api/chat/*`、`/mcp/*`，不需要额外开放 `3010`。Probe 页面支持按服务查看日志：从服务列表、Trace 服务节点或 Atlas 服务表点击服务名，会跳到 `/probe?tab=service&svc=<service>` 并直接读取该服务最近日志；从日志行点击“追踪”时会携带该行日志时间，自动换算 request_id 查询需要的 `glog.sh -b` 回看小时数。
+
+Nexus 是统一入口，但不是下游 MCP 的透明代理。它对外暴露的是 Nexus 命名、约束和审计后的工具面；Atlas / Probe / Lens 的内部 MCP 工具不会因为接入 Nexus 就自动全量对外可见。`/registry` 会返回当前受控暴露策略和 Nexus allowlist 中的工具列表。
+
+Nexus 默认从 `nexus/src/registry_manifests/default.json` 加载服务和工具 manifest；需要验证外部 manifest 时可设置 `NEXUS_REGISTRY_MANIFEST=/path/to/registry.json`。已批准且可由通用 adapter 覆盖的 manifest 工具会在启动时动态注册为 Nexus MCP tool。当前 Atlas / Lens 的普通工具已走这条动态路径，Probe 仍保留手写 wrapper 作为兼容入口。
+
+Nexus 的动态工具会进入统一 gateway pipeline：状态/权限检查、HTTP adapter 调用、超时隔离、结构化错误、响应裁剪、敏感字段脱敏和 JSONL 审计。`/api/registry/status` 可查看当前动态注册工具、manifest 工具清单和 reload 策略。FastMCP 当前可安全追加新工具名；替换已有工具定义仍建议重启 Nexus。
+
+Console 已提供 `/nexus` 只读页面，用于查看 Nexus registry、动态 MCP 工具、manifest 状态、权限 scope、risk、adapter、输入 schema、审批元数据和 reload 策略。
 
 如果开发服务器没有 PostgreSQL，可以只用 Docker 启动 Meridian 平台库，不需要重启 Docker daemon：
 
@@ -202,7 +210,7 @@ python3 scripts/agent_cli.py
 /trace <request_id>
 ```
 
-这条链路不依赖外部大模型，CLI 会通过 `http://127.0.0.1:3000/mcp/stream/` 调 Nexus，再由 Nexus 转发到 Probe。
+这条链路不依赖外部大模型，CLI 会通过 `http://127.0.0.1:3000/mcp/stream/` 调 Nexus，再由 Nexus 调用自己显式暴露的 `probe.*` 工具并转发到 Probe HTTP API。
 
 Console 本地开发同样经由 Nexus 转发后端请求，不再直接连接 Atlas / Probe / Lens。
 

@@ -298,10 +298,39 @@ class ChatToolDispatchTest(unittest.IsolatedAsyncioTestCase):
     def test_registry_lists_agent_relevant_atlas_and_lens_tools(self) -> None:
         self.assertEqual(
             server._registry["atlas"]["tools"],
-            ["atlas.list_services", "atlas.search_meta", "atlas.get_table"],
+            ["atlas.health.v1", "atlas.list_services", "atlas.search_meta", "atlas.get_table"],
         )
         self.assertIn("probe.search_ops_logs", server._registry["probe"]["tools"])
         self.assertEqual(
             server._registry["lens"]["tools"],
             ["lens.list_entities", "lens.describe_entity", "lens.query"],
         )
+
+    def test_registry_declares_controlled_tool_exposure_policy(self) -> None:
+        payload = server._registry_payload()
+
+        self.assertEqual(payload["tool_exposure"]["mode"], "controlled_gateway")
+        self.assertFalse(payload["tool_exposure"]["transparent_downstream_mcp"])
+        self.assertEqual(payload["tool_exposure"]["source"], "nexus_registry_allowlist")
+        self.assertEqual(
+            payload["service"][0]["tool_exposure"],
+            {
+                "source": "nexus_registry_allowlist",
+                "transparent_downstream_mcp": False,
+            },
+        )
+
+    def test_registry_loads_tool_manifests(self) -> None:
+        atlas_tools = {
+            tool["name"]: tool
+            for tool in server._registry["atlas"]["tool_manifests"]
+        }
+
+        self.assertEqual(atlas_tools["atlas.list_services"]["adapter"], "http")
+        self.assertEqual(atlas_tools["atlas.list_services"]["chat_name"], "atlas_list_services")
+        self.assertEqual(atlas_tools["atlas.list_services"]["path"], "/api/services")
+        self.assertEqual(atlas_tools["atlas.health.v1"]["status"], "approved")
+
+    def test_server_registers_manifest_only_mcp_tools(self) -> None:
+        self.assertIn("atlas.health.v1", server._dynamic_tools_registered)
+        self.assertIsNotNone(server.mcp._tool_manager.get_tool("atlas.health.v1"))

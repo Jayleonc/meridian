@@ -26,6 +26,14 @@ export default defineConfig({
         target: "http://127.0.0.1:3000",
         changeOrigin: true,
       },
+      "/api/registry": {
+        target: "http://127.0.0.1:3000",
+        changeOrigin: true,
+      },
+      "/registry": {
+        target: "http://127.0.0.1:3000",
+        changeOrigin: true,
+      },
       "/svc/atlas": {
         target: "http://127.0.0.1:3000",
         changeOrigin: true,

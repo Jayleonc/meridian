@@ -405,7 +405,77 @@ export const lens = {
   deleteEntity: (name: string) =>
     request<{ deleted: boolean; name: string }>(`/api/lens/entities/${name}`, {
       method: "DELETE",
-    }),
+  }),
+};
+
+// ── Nexus Registry ──
+
+export interface NexusToolExposurePolicy {
+  mode: string;
+  transparent_downstream_mcp: boolean;
+  source: string;
+  description?: string;
+}
+
+export interface NexusToolManifest {
+  name: string;
+  adapter: string;
+  version?: string;
+  status?: string;
+  description?: string;
+  chat_name?: string | null;
+  method?: string | null;
+  path?: string | null;
+  risk?: string;
+  required_scopes?: string[];
+  input_schema?: Record<string, unknown>;
+  exposure?: { mcp?: boolean; agent?: boolean };
+  approval?: Record<string, unknown>;
+  timeout_seconds?: number;
+  downstream_timeout_seconds?: number;
+  max_response_bytes?: number;
+  sensitive_fields?: string[];
+  sandbox?: Record<string, unknown>;
+  service?: string;
+  base_url?: string;
+}
+
+export interface NexusRegistryService {
+  name: string;
+  version: string;
+  base_url: string;
+  health: string;
+  api_prefix: string;
+  mcp: Record<string, string>;
+  tools: string[];
+  tool_manifests?: NexusToolManifest[];
+  tool_exposure?: {
+    source: string;
+    transparent_downstream_mcp: boolean;
+  };
+}
+
+export interface NexusRegistry {
+  tool_exposure: NexusToolExposurePolicy;
+  dynamic_tools_registered: string[];
+  service: NexusRegistryService[];
+}
+
+export interface NexusRegistryStatus {
+  tool_exposure: NexusToolExposurePolicy;
+  dynamic_tools_registered: string[];
+  manifest_tools: string[];
+  audit_records: number;
+  reload: {
+    enabled: boolean;
+    strategy: string;
+    note: string;
+  };
+}
+
+export const nexus = {
+  registry: () => request<NexusRegistry>("/registry"),
+  registryStatus: () => request<NexusRegistryStatus>("/api/registry/status"),
 };
 
 // ── Agent Chat ──
