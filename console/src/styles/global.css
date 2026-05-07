@@ -1125,6 +1125,11 @@ select.input option {
 .nexus-tools-table tr { cursor: pointer; }
 .nexus-tools-table tr.selected-row td { background: var(--amber-glow); }
 
+.nexus-tools-table th,
+.nexus-tools-table td {
+  vertical-align: middle;
+}
+
 .table-strong {
   color: var(--t1);
   overflow-wrap: anywhere;
@@ -1186,6 +1191,92 @@ select.input option {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.exposure-stack {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.exposure-stack.compact {
+  gap: 4px;
+}
+
+.exposure-stack.compact .badge {
+  min-width: 42px;
+  justify-content: center;
+}
+
+.label-with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.center-label {
+  justify-content: center;
+}
+
+.inline-label {
+  margin-bottom: 0;
+}
+
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border-1);
+  border-radius: 50%;
+  color: var(--t3);
+  background: var(--base);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  cursor: help;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.help-tip:hover,
+.help-tip:focus {
+  color: var(--amber);
+  border-color: var(--amber);
+  outline: none;
+}
+
+.help-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  z-index: 50;
+  width: min(280px, 70vw);
+  padding: 8px 10px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--r);
+  background: color-mix(in srgb, var(--base) 94%, black);
+  color: var(--t2);
+  font-family: var(--font-body);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+  box-shadow: var(--shadow-lg);
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--dur-fast), visibility var(--dur-fast);
+}
+
+.help-tip:hover .help-bubble,
+.help-tip:focus .help-bubble {
+  opacity: 1;
+  visibility: visible;
 }
 
 .schema-grid {
