@@ -142,7 +142,7 @@ export default function NexusPage() {
           <Metric label="审计记录" value={status?.audit_records ?? "—"} tone="violet" title="当前进程内记录到的 ToolGateway 调用审计条数。" />
         </div>
 
-        <div className="card mb-md">
+        <div className="card mb-md nexus-help-card">
           <div className="card-body nexus-policy-strip">
             <div>
               <div className="label-with-help mb-xs">
@@ -254,7 +254,7 @@ export default function NexusPage() {
 
 function Metric({ label, value, tone, title }: { label: string; value: string | number; tone: "teal" | "emerald" | "amber" | "violet"; title: string }) {
   return (
-    <div className="card" title={title}>
+    <div className="card nexus-help-card" title={title}>
       <div className="stat">
         <div className={`stat-val ${tone}`}>{value}</div>
         <div className="stat-label label-with-help center-label">
@@ -404,7 +404,7 @@ function ExposureBadges({ tool, compact = false }: { tool: ToolRow; compact?: bo
 
 function HelpTip({ text }: { text: string }) {
   return (
-    <button type="button" className="help-tip" aria-label={text}>
+    <button type="button" className="help-tip" aria-label={text} title={text}>
       ?
       <span className="help-bubble">{text}</span>
     </button>

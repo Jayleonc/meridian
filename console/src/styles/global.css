@@ -1082,6 +1082,10 @@ select.input option {
   min-height: 28px;
 }
 
+.nexus-help-card {
+  overflow: visible;
+}
+
 .seg-tabs {
   display: inline-flex;
   align-items: center;
