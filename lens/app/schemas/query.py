@@ -26,6 +26,7 @@ class QueryDSL(BaseModel):
     filter: list[FilterCondition] = []
     field: list[str] | None = None
     aggregate: Literal["count"] | None = None
+    preview: bool = False
     order_by: str | None = None  # 字段名，前缀 "-" 表示 DESC
     limit: int = Field(default=20, ge=1, le=100)
     time_range: TimeRange | None = None

@@ -116,13 +116,31 @@ def validate_dsl(dsl: QueryDSL, entity: EntityDefinition) -> ValidationResult:
     warnings = []
     cfg = get_settings().query
 
-    # 1. 明细查询按配置要求筛选条件；count 允许无筛选，表示统计当前实体。
-    if cfg.require_filter and dsl.aggregate != "count" and not dsl.filter:
-        errors.append("必须指定至少一个筛选条件（filter）")
+    has_time_range = bool(
+        dsl.time_range and (dsl.time_range.start or dsl.time_range.end)
+    )
+
+    # 1. 明细查询按配置要求收敛范围；count 和 preview 是单独受限模式。
+    if (
+        cfg.require_filter
+        and dsl.aggregate != "count"
+        and not dsl.preview
+        and not dsl.filter
+        and not has_time_range
+    ):
+        errors.append("必须指定至少一个筛选条件（filter）或时间范围（time_range）")
+
+    if dsl.preview:
+        if dsl.aggregate:
+            errors.append("预览样本不支持聚合查询")
+        if dsl.field:
+            errors.append("预览样本只返回默认安全字段，不支持自选返回字段")
+        if not _preview_field_names(entity, get_settings().sensitive_fields):
+            errors.append("当前实体没有可用于预览的非敏感默认字段")
 
     # 2. 检查必填筛选字段。count 不要求必填筛选字段。
     filter_fields = {f.field for f in dsl.filter}
-    if dsl.aggregate != "count":
+    if dsl.aggregate != "count" and not dsl.preview:
         for req_field in entity.constraint.required_filter_fields:
             if req_field not in filter_fields:
                 errors.append(f"必须包含筛选字段: {req_field}")
@@ -156,6 +174,8 @@ def validate_dsl(dsl: QueryDSL, entity: EntityDefinition) -> ValidationResult:
     # 7. 检查 limit
     if dsl.limit > cfg.max_limit:
         warnings.append(f"limit 超过最大值 {cfg.max_limit}，将自动截断")
+    if dsl.preview and dsl.limit > cfg.preview_limit:
+        warnings.append(f"预览样本最多返回 {cfg.preview_limit} 行，将自动截断")
 
     return ValidationResult(
         valid=len(errors) == 0,
@@ -206,7 +226,12 @@ def compile_to_sql(
     order_clause = "" if dsl.aggregate == "count" else _build_order_by(dsl, entity, dialect)
 
     # ── LIMIT ──
-    limit = 1 if dsl.aggregate == "count" else min(dsl.limit, cfg.query.max_limit)
+    if dsl.aggregate == "count":
+        limit = 1
+    elif dsl.preview:
+        limit = min(dsl.limit, cfg.query.preview_limit, cfg.query.max_limit)
+    else:
+        limit = min(dsl.limit, cfg.query.max_limit)
 
     # ── 组装 SQL ──
     sql = f"SELECT {select_fields} FROM {from_clause}"
@@ -229,7 +254,9 @@ def _build_select_fields(
     if dsl.aggregate == "count":
         return "COUNT(*) AS count"
 
-    if dsl.field:
+    if dsl.preview:
+        field_names = _preview_field_names(entity, sensitive_patterns)
+    elif dsl.field:
         field_names = dsl.field
     else:
         field_names = [
@@ -385,3 +412,25 @@ def _is_sensitive(field_name: str, patterns: list[str]) -> bool:
     """检查字段名是否匹配敏感字段模式。"""
     lower = field_name.lower()
     return any(p in lower for p in patterns)
+
+
+def _preview_field_names(
+    entity: EntityDefinition,
+    sensitive_patterns: list[str],
+) -> list[str]:
+    """预览样本只暴露默认可见且非敏感字段。"""
+    names = [
+        fname
+        for fname, fdef in entity.fields.items()
+        if fdef.default_visible
+        and not fdef.sensitive
+        and not _is_sensitive(fname, sensitive_patterns)
+    ]
+    if names:
+        return names[:12]
+
+    return [
+        fname
+        for fname, fdef in entity.fields.items()
+        if not fdef.sensitive and not _is_sensitive(fname, sensitive_patterns)
+    ][:8]

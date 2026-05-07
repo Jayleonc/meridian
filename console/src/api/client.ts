@@ -363,6 +363,7 @@ export interface QueryDSL {
   filter?: FilterCondition[];
   field?: string[];
   aggregate?: "count";
+  preview?: boolean;
   order_by?: string;
   limit?: number;
   time_range?: { start: string; end: string };

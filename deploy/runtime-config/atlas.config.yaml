@@ -1,0 +1,47 @@
+server:
+  name: atlas
+  environment: docker-compose
+  host: "0.0.0.0"
+  port: 3001
+  audit_log_path: /app/logs/atlas-audit.log
+
+business_mysql:
+  host: "172.31.0.6"
+  port: 3306
+  user: readonly
+  password: ""
+  database:
+    - highlink
+
+meridian_db:
+  host: "host.docker.internal"
+  port: 15432
+  user: root
+  password: ""
+  database: meridian
+
+supervisor:
+  enabled: false
+  xmlrpc_url: "http://127.0.0.1:9001/RPC2"
+  log_dir: /var/log/supervisor
+
+discovery:
+  providers:
+    - static
+    - probe_logs
+  static_services: []
+
+probe_logs:
+  enabled: true
+  base_url: "http://probe:3002"
+  timeout_seconds: 5
+
+snapshot:
+  collect_on_startup: false
+  auto_refresh_enabled: false
+  refresh_interval_hours: 1
+
+limits:
+  max_tables: 500
+  max_columns_per_table: 200
+  search_result_limit: 50

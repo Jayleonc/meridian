@@ -1,0 +1,15 @@
+.git
+.DS_Store
+.env
+.env.*
+.meridian
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/*.pyc
+**/*.pyo
+**/*.egg-info
+**/audit.log
+console/node_modules
+deploy/*.tar.gz

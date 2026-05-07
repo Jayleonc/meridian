@@ -43,6 +43,53 @@ MCP（Model Context Protocol）驱动的智能运维观测平台。
 | Lens | 3003 |
 | Trace | 3004 |
 
+## 开发服务器镜像包部署
+
+如果开发服务器有 Docker / Docker Compose，但不希望放源码，推荐使用镜像包发布链路。源码只在本地或构建机，服务器只接收 Docker images、runtime compose 和配置模板。
+
+```bash
+# 默认目标是 hldev，默认运行目录是 /opt/meridian
+make deploy
+
+# 只在本地构建镜像包，不 scp / 不部署；会校验本地 runtime 配置
+make deploy-build
+
+# 复用已经构建好的镜像包
+make deploy-existing TAG=codex-smoke
+
+# 冒烟检查
+make deploy-smoke
+```
+
+发布脚本会执行：
+
+```text
+npm run build
+docker build meridian/{nexus,atlas,probe,lens,trace}:<tag>
+docker save ... > .meridian/artifacts/<tag>/meridian-images-<tag>.tar.gz
+scp 到 /opt/meridian/releases/<tag>
+远端 docker load
+远端 docker compose up -d
+curl /api/registry/status 冒烟检查
+```
+
+构建会复用 Docker layer cache 和 BuildKit uv cache：业务代码改动不会重新下载 Python 依赖；只有 `pyproject.toml` / `uv.lock` 改动时才会重新同步依赖，并且会复用本机 uv 下载缓存。Python 包索引默认使用清华 PyPI mirror，可通过 `--python-index <url>` 覆盖。开发服务器是 x86_64，Makefile 默认强制构建 `linux/amd64` 镜像，避免 Apple Silicon 本机产出 arm64 镜像导致服务器 `exec format error`。
+
+runtime compose 默认复用开发服务器宿主机已有的 Meridian PostgreSQL，例如 `127.0.0.1:15432` 上的 `meridian-postgres`。容器内通过 `host.docker.internal:15432` 访问它；不会再额外启动一个空的 PostgreSQL 服务。
+
+服务器运行目录只需要保留：
+
+```text
+/opt/meridian/
+  docker-compose.yml
+  .env.release        # 当前镜像 tag，由脚本更新
+  .env.runtime        # 运行配置，首次发布自动生成，后续不覆盖
+  config/             # atlas/probe/lens runtime yaml，首次发布自动生成，后续不覆盖
+  logs/
+  run/
+  releases/
+```
+
 ## 开发服务器直跑
 
 如果不使用 Docker，可以在开发服务器直接克隆仓库后启动：
@@ -116,44 +163,6 @@ cp deploy/dev-server/probe.config.yaml .meridian/config/probe.config.yaml
 也可以显式设置 `MERIDIAN_ATLAS_CONFIG`、`MERIDIAN_PROBE_CONFIG`、`MERIDIAN_LENS_CONFIG` 指向任意外部路径。Probe 默认按 `Asia/Shanghai` 业务日志时区查找 `/data/brick/log/YYYYMMDDHH.log` 小时文件；如果服务器日志文件名使用其他时区，修改本地覆盖配置的 `time.log_timezone`。Atlas 在开发服务器配置中不会每次启动都重新全量采集业务 MySQL，而是优先从 Meridian PostgreSQL 恢复最近一次 schema 快照；需要重新采集时再通过 Console / API / MCP 手动 refresh。
 
 启动时如果看到 `使用仓库模板配置` 警告，说明当前服务没有命中本地覆盖配置；生产或共享服务器上应先补 `.meridian/config/*.config.yaml`。例如 MySQL 日志里出现 `using password: NO`，通常就是 Lens 读到了模板里的空密码配置。
-
-如果开发服务器 Node 版本太旧，可以直接使用仓库内预构建的 Console 静态产物：
-
-```bash
-cd /opt/meridian
-git pull
-./scripts/install-console-dist.sh deploy/console-dist.tar.gz
-./scripts/dev-server.sh --skip-console-build
-```
-
-如果需要更新这个预构建包，在有 Node >= 20 的本地机器运行：
-
-```bash
-make package-console-dist
-```
-
-开发服务器拉取新代码后，如果只想使用仓库内预构建 Console 包启动：
-
-```bash
-make dev-server-prebuilt
-```
-
-等价于：
-
-```bash
-./scripts/install-console-dist.sh deploy/console-dist.tar.gz
-./scripts/dev-server.sh --skip-console-build
-```
-
-如果希望在开发服务器后台运行，不占用当前 SSH 会话：
-
-```bash
-make dev-server-bg
-make dev-server-status
-make dev-server-stop
-```
-
-`dev-server-bg` 会复用预构建 Console 包，主进程 PID 写入 `.meridian/run/dev-server.pid`，外层输出写入 `.meridian/logs/dev-server.out`。这比直接后台运行 `make start` 更适合开发服务器，因为它仍然使用 `dev-server.sh` 的单端口暴露、内部服务回环绑定、本地配置优先级和 DevOps 日志目录。
 
 启动后，`dev-server.sh` 会把各服务输出写入：
 

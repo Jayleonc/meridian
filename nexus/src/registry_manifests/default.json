@@ -343,6 +343,10 @@
               "aggregate": {
                 "type": "string"
               },
+              "preview": {
+                "type": "boolean",
+                "default": false
+              },
               "order_by": {
                 "type": "string"
               },

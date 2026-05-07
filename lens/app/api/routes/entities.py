@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.schemas.query import QueryDSL
+from app.core.config import get_settings
 from app.services.entity_service import (
     delete_entity_definition,
     get_entity_definition,
@@ -63,7 +64,7 @@ async def validate(dsl: QueryDSL):
 
 class ImportRequest(BaseModel):
     database: str = ""
-    atlas_url: str = "http://127.0.0.1:3001"
+    atlas_url: str = ""
     db_type: str = "mysql"
     datasource: str = ""
     overwrite: bool = False
@@ -78,9 +79,10 @@ async def import_entities(req: ImportRequest):
     - 自动检测 time_field（created_at, create_time 等）
     - 自动映射 MySQL/PG 类型到 Lens 语义类型
     """
+    settings = get_settings()
     result = await import_from_atlas(
         database=req.database or None,
-        atlas_url=req.atlas_url,
+        atlas_url=req.atlas_url or settings.atlas_url,
         db_type=req.db_type,
         datasource=req.datasource,
         overwrite=req.overwrite,

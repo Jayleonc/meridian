@@ -80,6 +80,20 @@ class TestValidateDSL:
         assert result.valid is True
         assert result.errors == []
 
+    def test_preview_allows_missing_filter(self):
+        entity = _make_order_entity()
+        dsl = QueryDSL(entity="order", filter=[], preview=True, limit=20)
+        result = validate_dsl(dsl, entity)
+        assert result.valid is True
+        assert result.errors == []
+
+    def test_preview_rejects_custom_fields(self):
+        entity = _make_order_entity()
+        dsl = QueryDSL(entity="order", filter=[], preview=True, field=["phone"], limit=20)
+        result = validate_dsl(dsl, entity)
+        assert result.valid is False
+        assert any("默认安全字段" in e for e in result.errors)
+
     def test_unknown_filter_field(self):
         entity = _make_order_entity()
         dsl = QueryDSL(
@@ -245,6 +259,16 @@ class TestCompileToSQL:
         sql, params = compile_to_sql(dsl, entity)
         assert sql == "SELECT COUNT(*) AS count FROM `test`.`order` LIMIT 1"
         assert params == ()
+
+    def test_preview_uses_safe_default_fields_and_caps_limit(self):
+        entity = _make_order_entity()
+        dsl = QueryDSL(entity="order", filter=[], preview=True, order_by="-created_at", limit=100)
+        sql, params = compile_to_sql(dsl, entity)
+        assert "`order_id`" in sql
+        assert "`created_at` DESC" in sql
+        assert "`phone`" not in sql
+        assert "LIMIT 20" in sql
+        assert len(params) == 1  # preview still gets the default time range constraint.
 
 
 # ── PostgreSQL 方言测试 ────────────────────────

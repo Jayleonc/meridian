@@ -52,6 +52,7 @@ class QueryConfig(BaseModel):
 
     max_limit: int = 100
     default_limit: int = 20
+    preview_limit: int = 20
     default_time_range_days: int = 7
     timeout_seconds: int = 30
     require_filter: bool = True
@@ -59,6 +60,7 @@ class QueryConfig(BaseModel):
 
 class Settings(BaseModel):
     server: ServerConfig = ServerConfig()
+    atlas_url: str = "http://127.0.0.1:3001"
     business_mysql: BusinessMySQLConfig = BusinessMySQLConfig()  # 向后兼容
     business_datasource: list[DatasourceConfig] = []  # 多数据源（新格式）
     meridian_db: MeridianDBConfig = MeridianDBConfig()

@@ -1,0 +1,90 @@
+version: "3.8"
+
+services:
+  nexus:
+    image: ${MERIDIAN_IMAGE_PREFIX}/nexus:${MERIDIAN_IMAGE_TAG}
+    restart: unless-stopped
+    ports:
+      - "${MERIDIAN_PUBLIC_PORT}:3000"
+    env_file:
+      - ${MERIDIAN_RUNTIME_ENV_FILE}
+    environment:
+      ATLAS_URL: http://atlas:3001
+      PROBE_URL: http://probe:3002
+      LENS_URL: http://lens:3003
+      TRACE_URL: http://trace:3004
+      CONSOLE_DIST_DIR: /app/console/dist
+      MERIDIAN_SERVICE_LOG_DIR: /app/logs
+      MERIDIAN_RUN_DIR: /app/run
+    volumes:
+      - ./logs:/app/logs
+      - ./run:/app/run
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - atlas
+      - probe
+      - lens
+      - trace
+
+  atlas:
+    image: ${MERIDIAN_IMAGE_PREFIX}/atlas:${MERIDIAN_IMAGE_TAG}
+    restart: unless-stopped
+    env_file:
+      - ${MERIDIAN_RUNTIME_ENV_FILE}
+    environment:
+      MERIDIAN_ATLAS_CONFIG: /app/config/atlas.config.yaml
+    command: ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3001", "--no-access-log"]
+    expose:
+      - "3001"
+    volumes:
+      - ./config/atlas.config.yaml:/app/config/atlas.config.yaml:ro
+      - ./logs:/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  probe:
+    image: ${MERIDIAN_IMAGE_PREFIX}/probe:${MERIDIAN_IMAGE_TAG}
+    restart: unless-stopped
+    env_file:
+      - ${MERIDIAN_RUNTIME_ENV_FILE}
+    environment:
+      MERIDIAN_PROBE_CONFIG: /app/config/probe.config.yaml
+    command: ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3002", "--no-access-log"]
+    expose:
+      - "3002"
+    volumes:
+      - ./config/probe.config.yaml:/app/config/probe.config.yaml:ro
+      - ./logs:/app/logs
+      - ${MERIDIAN_PROBE_HOURLY_LOG_DIR}:/data/brick/log:ro
+      - ${MERIDIAN_PROBE_SUPERVISOR_LOG_DIR}:/var/log/supervisor:ro
+      - ${MERIDIAN_PROBE_TOOLS_DIR}:/data/pinfire/tools:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  lens:
+    image: ${MERIDIAN_IMAGE_PREFIX}/lens:${MERIDIAN_IMAGE_TAG}
+    restart: unless-stopped
+    env_file:
+      - ${MERIDIAN_RUNTIME_ENV_FILE}
+    environment:
+      MERIDIAN_LENS_CONFIG: /app/config/lens.config.yaml
+    command: ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3003", "--no-access-log"]
+    expose:
+      - "3003"
+    volumes:
+      - ./config/lens.config.yaml:/app/config/lens.config.yaml:ro
+      - ./logs:/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  trace:
+    image: ${MERIDIAN_IMAGE_PREFIX}/trace:${MERIDIAN_IMAGE_TAG}
+    restart: unless-stopped
+    env_file:
+      - ${MERIDIAN_RUNTIME_ENV_FILE}
+    command: ["/app/.venv/bin/uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "3004", "--no-access-log"]
+    expose:
+      - "3004"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

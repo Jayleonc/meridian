@@ -111,6 +111,7 @@ class LensQueryArgs(BaseModel):
     )
     field: list[str] | None = Field(None, description="要返回的字段；为空时使用实体默认字段。")
     aggregate: Literal["count"] | None = Field(None, description='聚合模式；当前仅支持 "count"。')
+    preview: bool = Field(False, description="受限样本预览模式；只返回默认安全字段，不能代替全量查询。")
     order_by: str | None = Field(None, description='排序字段；前缀 "-" 表示降序。')
     limit: int = Field(20, ge=1, le=100, description="明细返回条数，最大 100。")
     time_range: LensTimeRangeArgs | None = Field(None, description="时间范围约束。")

@@ -34,7 +34,7 @@ export default function LensPage() {
   const [selectedFields, setSelectedFields] = useState<string[]>([]);
   const [orderBy, setOrderBy] = useState("");
   const [limit, setLimit] = useState(20);
-  const [queryMode, setQueryMode] = useState<"rows" | "count">("rows");
+  const [queryMode, setQueryMode] = useState<"rows" | "count" | "preview">("rows");
   const [result, setResult] = useState<QueryResult | null>(null);
   const [queryLoading, setQueryLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -171,7 +171,7 @@ export default function LensPage() {
   // ── Execute query ──
   async function executeQuery(
     overrides: Partial<{
-      mode: "rows" | "count";
+      mode: "rows" | "count" | "preview";
       entity: string;
       filters: Array<{ field: string; op: string; value: string }>;
       fields: string[];
@@ -181,7 +181,6 @@ export default function LensPage() {
   ) {
     const targetEntity = overrides.entity ?? activeEntity;
     if (!targetEntity) return;
-    setQueryLoading(true);
     setError("");
 
     const nextMode = overrides.mode ?? queryMode;
@@ -195,16 +194,28 @@ export default function LensPage() {
       .map((f) => ({
         field: f.field,
         op: f.op,
-        value: f.op === "in" ? f.value.split(",").map((s) => s.trim()) : f.value,
+        value: ["in", "between"].includes(f.op)
+          ? f.value.split(",").map((s) => s.trim()).filter(Boolean)
+          : f.value,
       }));
+
+    if (nextMode === "rows" && validFilters.length === 0) {
+      const message = "明细查询需要至少一个筛选条件，避免误扫生产业务表。";
+      setResult({ success: false, error: message });
+      toast("info", message);
+      return;
+    }
+
+    setQueryLoading(true);
 
     const dsl = {
       entity: targetEntity,
       filter: validFilters.length > 0 ? validFilters : undefined,
       field: nextMode === "rows" && nextFields.length > 0 ? nextFields : undefined,
       aggregate: nextMode === "count" ? "count" as const : undefined,
-      order_by: nextMode === "rows" ? nextOrderBy || undefined : undefined,
-      limit: nextMode === "count" ? 1 : nextLimit,
+      preview: nextMode === "preview" ? true : undefined,
+      order_by: nextMode !== "count" ? nextOrderBy || undefined : undefined,
+      limit: nextMode === "count" ? 1 : nextMode === "preview" ? Math.min(nextLimit, 20) : nextLimit,
     };
 
     try {
@@ -257,16 +268,25 @@ export default function LensPage() {
     setResult(null);
   }
 
-  function applyRecentTemplate() {
+  function runPreviewSample() {
     const timeField =
       selected?.constraint.time_field ||
       sortableFields.find((field) => /time|date|created|updated/i.test(field)) ||
       sortableFields[0] ||
       "";
-    setQueryMode("rows");
+    setQueryMode("preview");
+    setFilters([]);
+    setSelectedFields([]);
     setOrderBy(timeField ? `-${timeField}` : "");
     setLimit(20);
     setResult(null);
+    void executeQuery({
+      mode: "preview",
+      filters: [],
+      fields: [],
+      orderBy: timeField ? `-${timeField}` : "",
+      limit: 20,
+    });
   }
 
   function runCountAll() {
@@ -284,6 +304,7 @@ export default function LensPage() {
       filter?: Array<{ field: string; op: string; value: unknown }>;
       field?: string[];
       aggregate?: "count";
+      preview?: boolean;
       order_by?: string;
       limit?: number;
     };
@@ -299,7 +320,7 @@ export default function LensPage() {
         );
       }
       if (dsl.field) setSelectedFields(dsl.field);
-      setQueryMode(dsl.aggregate === "count" ? "count" : "rows");
+      setQueryMode(dsl.aggregate === "count" ? "count" : dsl.preview ? "preview" : "rows");
       if (dsl.order_by) setOrderBy(dsl.order_by);
       if (dsl.limit) setLimit(dsl.limit);
     });
@@ -342,6 +363,7 @@ export default function LensPage() {
     });
   }, [entities, entityQuery, entityDatabase]);
   const hasEffectiveFilters = filters.some((f) => f.field && f.value.trim());
+  const canRunRowsQuery = queryMode !== "rows" || hasEffectiveFilters;
   const countValue = Number(result?.count ?? 0);
 
   return (
@@ -602,7 +624,8 @@ export default function LensPage() {
                     <button
                       className="btn btn-primary btn-sm"
                       onClick={() => executeQuery()}
-                      disabled={queryLoading}
+                      disabled={queryLoading || !canRunRowsQuery}
+                      title={!canRunRowsQuery ? "明细查询需要筛选条件；如需看数据形态，请使用 Preview 样本。" : undefined}
                     >
                       {queryLoading ? <><span className="spinner" /> 查询中</> : "执行查询"}
                     </button>
@@ -620,8 +643,8 @@ export default function LensPage() {
                     <button className="btn btn-ghost btn-sm" onClick={applyDefaultFieldsTemplate}>
                       返回默认字段
                     </button>
-                    <button className="btn btn-ghost btn-sm" onClick={applyRecentTemplate}>
-                      最近记录排序
+                    <button className="btn btn-ghost btn-sm" onClick={runPreviewSample} disabled={queryLoading}>
+                      预览样本 Preview
                     </button>
                   </div>
                   <div className="row gap-sm mb-md wrap">
@@ -638,8 +661,24 @@ export default function LensPage() {
                     >
                       Count
                     </button>
+                    <button
+                      className={`btn btn-sm ${queryMode === "preview" ? "btn-primary" : "btn-ghost"}`}
+                      onClick={() => {
+                        setQueryMode("preview");
+                        setSelectedFields([]);
+                        setLimit((current) => Math.min(current, 20));
+                      }}
+                    >
+                      Preview 样本
+                    </button>
+                    {queryMode === "rows" && !hasEffectiveFilters && (
+                      <span className="badge badge-coral">明细查询需要筛选条件，避免扫表</span>
+                    )}
                     {queryMode === "count" && (
-                      <span className="badge badge-dim">统计当前实体行数，可选筛选条件，不返回明细字段</span>
+                      <span className="badge badge-dim">统计当前实体行数；大表建议先加筛选条件</span>
+                    )}
+                    {queryMode === "preview" && (
+                      <span className="badge badge-dim">只返回默认安全字段，最多 20 行，不代表全部数据</span>
                     )}
                   </div>
 
@@ -706,10 +745,10 @@ export default function LensPage() {
                   )}
 
                   {/* Order & Limit */}
-                  {queryMode === "rows" && (
+                  {queryMode !== "count" && (
                   <div className="row gap-md">
                     <div style={{ flex: 1 }}>
-                      <div className="field-label mb-sm">排序</div>
+                      <div className="field-label mb-sm">{queryMode === "preview" ? "样本排序" : "排序"}</div>
                       <select className="input" value={orderBy} onChange={(e) => setOrderBy(e.target.value)}>
                         <option value="">默认排序</option>
                         {sortableFields.map((n) => (
@@ -726,9 +765,9 @@ export default function LensPage() {
                         className="input"
                         type="number"
                         value={limit}
-                        onChange={(e) => setLimit(Math.max(1, Math.min(100, Number(e.target.value))))}
+                        onChange={(e) => setLimit(Math.max(1, Math.min(queryMode === "preview" ? 20 : 100, Number(e.target.value))))}
                         min={1}
-                        max={100}
+                        max={queryMode === "preview" ? 20 : 100}
                       />
                     </div>
                   </div>
@@ -745,7 +784,11 @@ export default function LensPage() {
                       {result.success ? (
                         <>
                           <span className="badge badge-emerald">
-                            {queryMode === "count" ? `Count ${result.count}` : `${result.count} 行`}
+                            {queryMode === "count"
+                              ? `Count ${result.count}`
+                              : queryMode === "preview"
+                                ? `Preview ${result.count} 行`
+                                : `${result.count} 行`}
                           </span>
                           <span className="badge badge-dim">{result.duration_ms}ms</span>
                           {result.sql && (

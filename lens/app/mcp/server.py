@@ -86,6 +86,7 @@ async def query(
     entity: str,
     filter: list[dict] | None = None,
     field: list[str] | None = None,
+    preview: bool = False,
     order_by: str | None = None,
     limit: int = 20,
     time_range: dict | None = None,
@@ -97,6 +98,7 @@ async def query(
     - filter: 筛选条件列表，每个为 {"field": "xxx", "op": "eq", "value": "yyy"}
       支持操作符: eq, ne, gt, gte, lt, lte, in, like, between
     - field: 要返回的字段列表（不传返回默认字段集）
+    - preview: 预览样本模式；只返回默认安全字段，最多返回配置的 preview_limit 行
     - order_by: 排序字段，前缀 "-" 表示降序（如 "-created_at"）
     - limit: 返回条数，默认 20，最大 100
     - time_range: 时间范围 {"start": "2026-03-01", "end": "2026-03-19"}
@@ -109,6 +111,7 @@ async def query(
         entity=entity,
         filter=filters,
         field=field,
+        preview=preview,
         order_by=order_by,
         limit=min(limit, 100),
         time_range=tr,
@@ -135,6 +138,7 @@ async def validate(
     entity: str,
     filter: list[dict] | None = None,
     field: list[str] | None = None,
+    preview: bool = False,
     order_by: str | None = None,
     limit: int = 20,
 ) -> str:
@@ -148,6 +152,7 @@ async def validate(
         entity=entity,
         filter=filters,
         field=field,
+        preview=preview,
         order_by=order_by,
         limit=min(limit, 100),
     )

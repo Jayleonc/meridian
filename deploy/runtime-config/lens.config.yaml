@@ -1,23 +1,35 @@
 server:
   name: lens
-  environment: dev
+  environment: docker-compose
   host: "0.0.0.0"
   port: 3003
-  audit_log_path: ./audit.log
+  audit_log_path: /app/logs/lens-audit.log
+
+atlas_url: "http://atlas:3001"
 
 business_mysql:
-  host: "127.0.0.1"
+  host: "172.31.0.6"
   port: 3306
-  user: root
-  password: root
+  user: readonly
+  password: ""
   database:
-    - test
+    - highlink
+
+business_datasource:
+  - name: default-mysql
+    type: mysql
+    host: "172.31.0.6"
+    port: 3306
+    user: readonly
+    password: ""
+    database:
+      - highlink
 
 meridian_db:
-  host: "127.0.0.1"
+  host: "host.docker.internal"
   port: 15432
   user: root
-  password: jayleonc
+  password: ""
   database: meridian
 
 query:

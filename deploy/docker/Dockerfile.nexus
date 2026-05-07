@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1.7
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+ARG PYTHON_PACKAGE_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_CACHE_DIR=/root/.cache/uv \
+    UV_LINK_MODE=copy \
+    UV_DEFAULT_INDEX=${PYTHON_PACKAGE_INDEX_URL} \
+    CONSOLE_DIST_DIR=/app/console/dist
+
+COPY nexus/pyproject.toml nexus/uv.lock ./
+RUN --mount=type=cache,id=meridian-uv-cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
+
+COPY nexus/ ./
+COPY console/dist/ /app/console/dist/
+
+EXPOSE 3000
+
+CMD ["/app/.venv/bin/uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "3000", "--no-access-log"]
