@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useApp } from "../context/AppContext";
 import { useKeyboard } from "../hooks/useKeyboard";
 
 interface CmdItem {
@@ -16,6 +17,7 @@ export default function CommandPalette() {
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+  const { demoMode } = useApp();
 
   useKeyboard("k", () => setOpen(true), { meta: true });
   useKeyboard("Escape", () => setOpen(false), { enabled: open });
@@ -29,20 +31,27 @@ export default function CommandPalette() {
   }, [open]);
 
   const items = useMemo<CmdItem[]>(
-    () => [
-      { id: "dash", icon: "\u25A3", label: "Dashboard", hint: "/", action: () => navigate("/") },
-      { id: "atlas", icon: "\u2B22", label: "Atlas — 元数据", hint: "/atlas", action: () => navigate("/atlas") },
-      { id: "probe", icon: "\u25CE", label: "Probe — 日志", hint: "/probe", action: () => navigate("/probe") },
-      { id: "lens", icon: "\u25C8", label: "Lens — 数据查询", hint: "/lens", action: () => navigate("/lens") },
-      { id: "nexus", icon: "\u25A6", label: "Nexus — Registry", hint: "/nexus", action: () => navigate("/nexus") },
-      { id: "search", icon: "\u2315", label: "搜索日志", hint: "Probe", action: () => navigate("/probe?tab=search") },
-      { id: "errors", icon: "\u26A0", label: "最近错误", hint: "Probe", action: () => navigate("/probe?tab=errors") },
-      { id: "trace", icon: "\u21C4", label: "追踪请求", hint: "Probe", action: () => navigate("/probe?tab=trace") },
-      { id: "entities", icon: "\u2637", label: "业务实体", hint: "Lens", action: () => navigate("/lens") },
-      { id: "services", icon: "\u229A", label: "服务发现", hint: "Atlas", action: () => navigate("/atlas?tab=services") },
-      { id: "schemas", icon: "\u2592", label: "Schema 浏览", hint: "Atlas", action: () => navigate("/atlas?tab=schemas") },
-    ],
-    [navigate]
+    () => {
+      const base: CmdItem[] = [
+        { id: "dash", icon: "\u25A3", label: "Dashboard", hint: "/", action: () => navigate("/") },
+        { id: "chat", icon: "\u25CC", label: "Agent", hint: "/chat", action: () => navigate("/chat") },
+      ];
+      if (demoMode) return base;
+      return [
+        ...base,
+        { id: "atlas", icon: "\u2B22", label: "Atlas — 元数据", hint: "/atlas", action: () => navigate("/atlas") },
+        { id: "probe", icon: "\u25CE", label: "Probe — 日志", hint: "/probe", action: () => navigate("/probe") },
+        { id: "lens", icon: "\u25C8", label: "Lens — 数据查询", hint: "/lens", action: () => navigate("/lens") },
+        { id: "nexus", icon: "\u25A6", label: "Nexus — Registry", hint: "/nexus", action: () => navigate("/nexus") },
+        { id: "search", icon: "\u2315", label: "搜索日志", hint: "Probe", action: () => navigate("/probe?tab=search") },
+        { id: "errors", icon: "\u26A0", label: "最近错误", hint: "Probe", action: () => navigate("/probe?tab=errors") },
+        { id: "trace", icon: "\u21C4", label: "追踪请求", hint: "Probe", action: () => navigate("/probe?tab=trace") },
+        { id: "entities", icon: "\u2637", label: "业务实体", hint: "Lens", action: () => navigate("/lens") },
+        { id: "services", icon: "\u229A", label: "服务发现", hint: "Atlas", action: () => navigate("/atlas?tab=services") },
+        { id: "schemas", icon: "\u2592", label: "Schema 浏览", hint: "Atlas", action: () => navigate("/atlas?tab=schemas") },
+      ];
+    },
+    [demoMode, navigate]
   );
 
   const filtered = query

@@ -4,13 +4,18 @@
 Nexus 自己作为 MCP Server 暴露受控工具，内部通过下游服务 HTTP API 转发。
 """
 
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
 
@@ -21,7 +26,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
 from pydantic import ValidationError
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-from starlette.responses import FileResponse, Response
+from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from src.agent import create_chat_router
 from src.agent.tools import validate_tool_args
@@ -51,6 +56,8 @@ RESERVED_FRONTEND_PREFIXES = {
     "health",
     "registry",
 }
+AUTH_COOKIE_NAME = os.getenv("NEXUS_AUTH_COOKIE_NAME", "meridian_session")
+DEFAULT_AUTH_SESSION_SECONDS = 43200
 
 
 chat_session_store = HybridSessionStore()
@@ -69,6 +76,187 @@ session_manager = StreamableHTTPSessionManager(
 class StreamableHTTPApp:
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
         await session_manager.handle_request(scope, receive, send)
+
+
+@dataclass(frozen=True)
+class AuthSettings:
+    enabled: bool
+    username: str
+    password: str
+    secret: str
+    cookie_name: str
+    session_seconds: int
+    cookie_secure: bool
+
+
+@dataclass(frozen=True)
+class DemoSettings:
+    enabled: bool
+    allowed_pages: tuple[str, ...]
+    blocked_services: tuple[str, ...]
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _auth_settings() -> AuthSettings:
+    username = os.getenv("NEXUS_AUTH_USERNAME", "").strip()
+    password = os.getenv("NEXUS_AUTH_PASSWORD", "")
+    explicit_enabled = os.getenv("NEXUS_AUTH_ENABLED")
+    enabled = _env_bool("NEXUS_AUTH_ENABLED") if explicit_enabled is not None else bool(username and password)
+    secret = os.getenv("NEXUS_AUTH_SECRET") or f"{username}:{password}:meridian"
+    session_seconds = max(300, _env_int("NEXUS_AUTH_SESSION_SECONDS", DEFAULT_AUTH_SESSION_SECONDS))
+    return AuthSettings(
+        enabled=enabled,
+        username=username,
+        password=password,
+        secret=secret,
+        cookie_name=os.getenv("NEXUS_AUTH_COOKIE_NAME", AUTH_COOKIE_NAME),
+        session_seconds=session_seconds,
+        cookie_secure=_env_bool("NEXUS_AUTH_COOKIE_SECURE"),
+    )
+
+
+def _demo_settings() -> DemoSettings:
+    return DemoSettings(
+        enabled=_env_bool("NEXUS_DEMO_MODE"),
+        allowed_pages=("/", "/chat"),
+        blocked_services=("atlas", "lens", "probe", "trace"),
+    )
+
+
+def _auth_configured(settings: AuthSettings) -> bool:
+    return bool(settings.username and settings.password and settings.secret)
+
+
+def _b64_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _b64_decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode((value + padding).encode("ascii"))
+
+
+def _sign_session(payload: str, secret: str) -> str:
+    return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _make_session_cookie(settings: AuthSettings) -> tuple[str, int]:
+    expires_at = int(time.time()) + settings.session_seconds
+    payload = _b64_encode(f"{settings.username}:{expires_at}".encode("utf-8"))
+    signature = _sign_session(payload, settings.secret)
+    return f"{payload}.{signature}", expires_at
+
+
+def _read_session_cookie(request: Request, settings: AuthSettings) -> dict[str, Any] | None:
+    value = request.cookies.get(settings.cookie_name)
+    if not value or "." not in value:
+        return None
+    payload, signature = value.rsplit(".", 1)
+    expected = _sign_session(payload, settings.secret)
+    if not hmac.compare_digest(signature, expected):
+        return None
+    try:
+        raw = _b64_decode(payload).decode("utf-8")
+        username, expires_raw = raw.rsplit(":", 1)
+        expires_at = int(expires_raw)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if username != settings.username or expires_at < int(time.time()):
+        return None
+    return {"username": username, "expires_at": expires_at}
+
+
+def _auth_exempt_path(path: str) -> bool:
+    if path in {"/login", "/health", "/favicon.ico", "/robots.txt"}:
+        return True
+    return path.startswith("/assets/") or path.startswith("/api/auth/")
+
+
+def _api_auth_response() -> JSONResponse:
+    return JSONResponse(
+        {"error": "unauthorized", "detail": "login required"},
+        status_code=401,
+        headers={"WWW-Authenticate": "Meridian"},
+    )
+
+
+def _auth_not_configured_response() -> JSONResponse:
+    return JSONResponse(
+        {
+            "error": "auth_not_configured",
+            "detail": "set NEXUS_AUTH_USERNAME and NEXUS_AUTH_PASSWORD when Nexus auth is enabled",
+        },
+        status_code=503,
+    )
+
+
+def _is_api_like_path(path: str) -> bool:
+    first = path.strip("/").split("/", 1)[0]
+    return first in {"api", "svc", "mcp", "registry"}
+
+
+def _demo_blocked_response(path: str) -> JSONResponse:
+    return JSONResponse(
+        {
+            "error": "demo_restricted",
+            "detail": "this route is hidden in demo mode",
+            "path": path,
+        },
+        status_code=403,
+    )
+
+
+def _demo_blocks_request(request: Request, settings: DemoSettings) -> bool:
+    if not settings.enabled:
+        return False
+
+    path = request.url.path
+    method = request.method.upper()
+    if path in {"/", "/chat", "/login", "/health", "/api/nexus"}:
+        return False
+    if path.startswith("/assets/") or path.startswith("/api/auth/"):
+        return False
+
+    if path == "/api/chat/sessions" and method == "GET":
+        return True
+    if path == "/api/chat/messages/search":
+        return True
+    if path.startswith("/api/chat/"):
+        return False
+
+    blocked_prefixes = (
+        "/api/atlas",
+        "/api/lens",
+        "/api/probe",
+        "/api/trace",
+        "/api/devops",
+        "/api/diagnosis",
+        "/api/registry",
+        "/svc",
+        "/mcp",
+        "/registry",
+    )
+    if path.startswith(blocked_prefixes):
+        return True
+
+    first = path.strip("/").split("/", 1)[0]
+    return first in {"atlas", "lens", "probe", "trace", "nexus"}
 
 
 @asynccontextmanager
@@ -93,9 +281,21 @@ def _console_dist_dir() -> Path:
 
 
 def _nexus_info() -> dict[str, Any]:
+    auth = _auth_settings()
+    demo = _demo_settings()
     return {
         "name": "nexus",
         "version": VERSION,
+        "auth": {
+            "enabled": auth.enabled,
+            "cookie_name": auth.cookie_name,
+            "session_seconds": auth.session_seconds,
+        },
+        "demo": {
+            "enabled": demo.enabled,
+            "allowed_pages": list(demo.allowed_pages),
+            "blocked_services": list(demo.blocked_services),
+        },
         "tool_exposure": TOOL_EXPOSURE_POLICY,
         "mcp_sse": "/mcp/sse",
         "mcp_stream": "/mcp/stream/",
@@ -473,6 +673,13 @@ async def _diagnose_request(args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _call_chat_tool(name: str, args: dict[str, Any]) -> Any:
+    if _demo_settings().enabled:
+        return {
+            "error": "demo_restricted",
+            "detail": "Agent tools are disabled in demo mode to avoid exposing live logs or database metadata.",
+            "tool": name,
+        }
+
     if name == "probe_search_by_request_id":
         request_id = str(args["request_id"])
         return await _probe(
@@ -936,6 +1143,83 @@ def create_app() -> FastAPI:
     console_dist = _console_dist_dir()
     console_index = console_dist / "index.html"
     console_enabled = console_index.exists()
+
+    @app.middleware("http")
+    async def auth_gate(request: Request, call_next):
+        settings = _auth_settings()
+        if settings.enabled and not _auth_exempt_path(request.url.path):
+            if not _auth_configured(settings):
+                return _auth_not_configured_response()
+            if not _read_session_cookie(request, settings):
+                if _is_api_like_path(request.url.path):
+                    return _api_auth_response()
+                target = request.url.path
+                if request.url.query:
+                    target = f"{target}?{request.url.query}"
+                return RedirectResponse(url=f"/login?next={quote(target, safe='')}", status_code=303)
+
+        demo = _demo_settings()
+        if _demo_blocks_request(request, demo):
+            if _is_api_like_path(request.url.path):
+                return _demo_blocked_response(request.url.path)
+            return RedirectResponse(url="/", status_code=303)
+        return await call_next(request)
+
+    @app.get("/api/auth/me")
+    async def auth_me(request: Request):
+        settings = _auth_settings()
+        if not settings.enabled:
+            return {"authenticated": True, "enabled": False, "username": None}
+        if not _auth_configured(settings):
+            return _auth_not_configured_response()
+        session = _read_session_cookie(request, settings)
+        if not session:
+            raise HTTPException(status_code=401, detail="login required")
+        return {"authenticated": True, "enabled": True, **session}
+
+    @app.post("/api/auth/login")
+    async def auth_login(body: dict[str, Any]):
+        settings = _auth_settings()
+        if not settings.enabled:
+            return {"authenticated": True, "enabled": False, "username": None}
+        if not _auth_configured(settings):
+            return _auth_not_configured_response()
+        username = str(body.get("username", "")).strip()
+        password = str(body.get("password", ""))
+        if not (
+            hmac.compare_digest(username, settings.username)
+            and hmac.compare_digest(password, settings.password)
+        ):
+            return JSONResponse(
+                {"error": "invalid_credentials", "detail": "invalid username or password"},
+                status_code=401,
+            )
+        cookie_value, expires_at = _make_session_cookie(settings)
+        response = JSONResponse(
+            {
+                "authenticated": True,
+                "enabled": True,
+                "username": settings.username,
+                "expires_at": expires_at,
+            }
+        )
+        response.set_cookie(
+            settings.cookie_name,
+            cookie_value,
+            max_age=settings.session_seconds,
+            httponly=True,
+            secure=settings.cookie_secure,
+            samesite="lax",
+            path="/",
+        )
+        return response
+
+    @app.post("/api/auth/logout")
+    async def auth_logout():
+        settings = _auth_settings()
+        response = JSONResponse({"authenticated": False, "enabled": settings.enabled})
+        response.delete_cookie(settings.cookie_name, path="/")
+        return response
 
     @app.get("/")
     async def root():

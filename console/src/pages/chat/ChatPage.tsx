@@ -15,6 +15,11 @@ const EXAMPLES = [
   "列出当前可观测服务",
   "搜索 timeout 相关日志",
 ];
+const DEMO_EXAMPLES = [
+  "介绍 Meridian 的五层诊断模型",
+  "这个演示环境隐藏了哪些内部数据？",
+  "如果要排查一个 request_id，Meridian 会怎么组织证据？",
+];
 const CHAT_SESSION_KEY = "meridian.chat.session_id";
 const TURN_RECONCILE_TIMEOUT_MS = 90000;
 
@@ -104,7 +109,7 @@ function mergeSessionSummary(
 }
 
 export default function ChatPage() {
-  const { toast } = useApp();
+  const { toast, configLoaded, demoMode } = useApp();
   const [params, setParams] = useSearchParams();
   const [config, setConfig] = useState<ChatConfig | null>(null);
   const [session, setSession] = useState<ChatSession | null>(null);
@@ -213,13 +218,14 @@ export default function ChatPage() {
   useEffect(() => {
     let alive = true;
     async function boot() {
+      if (!configLoaded) return;
       setLoading(true);
       try {
-        const [cfg, list] = await Promise.all([
-          chat.config(),
-          chat.listSessions(30).catch(() => ({ sessions: [] })),
-        ]);
-        const savedSessionId = window.localStorage.getItem(CHAT_SESSION_KEY);
+        const cfg = await chat.config();
+        const list = demoMode
+          ? { sessions: [] }
+          : await chat.listSessions(30).catch(() => ({ sessions: [] }));
+        const savedSessionId = demoMode ? null : window.localStorage.getItem(CHAT_SESSION_KEY);
         let activeSession: ChatSession | null = null;
         if (savedSessionId) {
           try {
@@ -239,7 +245,7 @@ export default function ChatPage() {
         if (!alive) return;
         setConfig(cfg);
         setSession(activeSession);
-        setSessions(mergeSessionSummary(list.sessions, activeSession));
+        setSessions(demoMode ? [summarizeSession(activeSession)] : mergeSessionSummary(list.sessions, activeSession));
       } catch (e) {
         toast("error", e instanceof Error ? e.message : "Agent 初始化失败");
       } finally {
@@ -250,7 +256,7 @@ export default function ChatPage() {
     return () => {
       alive = false;
     };
-  }, [toast]);
+  }, [configLoaded, demoMode, toast]);
 
   useEffect(() => {
     threadRef.current?.scrollTo({
@@ -372,7 +378,9 @@ export default function ChatPage() {
         <div className="flex-between">
           <div>
             <h2>Agent</h2>
-            <div className="page-desc">Nexus 编排 — 当前接入 Probe 诊断工具</div>
+            <div className="page-desc">
+              {demoMode ? "演示模式 — 工具和真实日志/数据库访问已关闭" : "Nexus 编排 — 当前接入 Probe 诊断工具"}
+            </div>
           </div>
           <div className="row gap-sm wrap">
             <button className="btn btn-ghost btn-sm" type="button" onClick={() => void createNewSession()} disabled={loading || sending}>
@@ -386,8 +394,8 @@ export default function ChatPage() {
         </div>
       </div>
 
-      <div className="page-body chat-page">
-        <aside className="chat-session-panel">
+      <div className={`page-body chat-page ${demoMode ? "demo-chat-page" : ""}`}>
+        {!demoMode && <aside className="chat-session-panel">
           <div className="chat-session-head">
             <div>
               <h3>会话</h3>
@@ -438,7 +446,7 @@ export default function ChatPage() {
               </button>
             ))}
           </div>
-        </aside>
+        </aside>}
 
         <div className="chat-workspace">
           <div className="chat-thread" ref={threadRef}>
@@ -450,7 +458,7 @@ export default function ChatPage() {
 
             {!loading && session?.messages.length === 0 && (
               <div className="chat-empty">
-                {EXAMPLES.map((example) => (
+                {(demoMode ? DEMO_EXAMPLES : EXAMPLES).map((example) => (
                   <button
                     key={example}
                     className="chat-example"
@@ -490,7 +498,7 @@ export default function ChatPage() {
             <textarea
               className="input chat-input"
               aria-label="Agent 消息"
-              placeholder="问 Meridian，例如：最近 1 小时有哪些错误？"
+              placeholder={demoMode ? "问 Meridian 的架构、演示范围或诊断流程" : "问 Meridian，例如：最近 1 小时有哪些错误？"}
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {

@@ -70,12 +70,14 @@ docker save ... > .meridian/artifacts/<tag>/meridian-images-<tag>.tar.gz
 scp 到 /opt/meridian/releases/<tag>
 远端 docker load
 远端 docker compose up -d
-curl /api/registry/status 冒烟检查
+登录后 curl /api/registry/status 冒烟检查（如果 `NEXUS_AUTH_ENABLED=true`）
 ```
 
 构建会复用 Docker layer cache 和 BuildKit uv cache：业务代码改动不会重新下载 Python 依赖；只有 `pyproject.toml` / `uv.lock` 改动时才会重新同步依赖，并且会复用本机 uv 下载缓存。Python 包索引默认使用清华 PyPI mirror，可通过 `--python-index <url>` 覆盖。开发服务器是 x86_64，Makefile 默认强制构建 `linux/amd64` 镜像，避免 Apple Silicon 本机产出 arm64 镜像导致服务器 `exec format error`。
 
 runtime compose 默认复用开发服务器宿主机已有的 Meridian PostgreSQL，例如 `127.0.0.1:15432` 上的 `meridian-postgres`。容器内通过 `host.docker.internal:15432` 访问它；不会再额外启动一个空的 PostgreSQL 服务。
+
+公网简历演示入口当前使用单独的 Nginx 容器，不占用已有 knowledge-hub 的 `80` 端口：`deploy/meridian-demo-nginx.conf` 监听容器内 `80`，服务器映射为 `18088:80`，反代到 highlink 的 Nexus `3000`，并在代理层再次屏蔽 Atlas / Lens / Probe / Trace / DevOps / MCP / Registry 内部路径。
 
 服务器运行目录只需要保留：
 
@@ -108,6 +110,8 @@ http://<dev-server>:3000
 ```
 
 Console 静态资源由 Nexus 托管，Console 的所有后端请求仍走 `/api/*`、`/svc/*`、`/api/chat/*`、`/mcp/*`，不需要额外开放 `3010`。Probe 页面支持按服务查看日志：从服务列表、Trace 服务节点或 Atlas 服务表点击服务名，会跳到 `/probe?tab=service&svc=<service>` 并直接读取该服务最近日志；从日志行点击“追踪”时会携带该行日志时间，自动换算 request_id 查询需要的 `glog.sh -b` 回看小时数。
+
+临时公网演示时可以在 Nexus 开启轻量登录门禁：设置 `NEXUS_AUTH_ENABLED=true`、`NEXUS_AUTH_USERNAME`、`NEXUS_AUTH_PASSWORD` 和 `NEXUS_AUTH_SECRET` 后，Console、API、MCP 和 registry 都需要先通过 `/login` 登录。若设置 `NEXUS_DEMO_MODE=true`，Nexus 会进一步隐藏 Atlas / Lens / Probe / Trace / DevOps / MCP / Registry 等内部入口，只保留概览和 Agent 演示面。该能力默认关闭，避免影响本地开发。
 
 Nexus 是统一入口，但不是下游 MCP 的透明代理。它对外暴露的是 Nexus 命名、约束和审计后的工具面；Atlas / Probe / Lens 的内部 MCP 工具不会因为接入 Nexus 就自动全量对外可见。`/registry` 会返回当前受控暴露策略和 Nexus allowlist 中的工具列表。
 

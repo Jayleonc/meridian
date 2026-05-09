@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { auth } from "../api/client";
 import { useApp } from "../context/AppContext";
 import { useInvestigation, getStepIcon } from "../context/InvestigationContext";
 import CommandPalette from "./CommandPalette";
@@ -15,8 +16,21 @@ const NAV = [
 ];
 
 export default function Layout() {
-  const { health, sidebarOpen, toggleSidebar, toasts, dismissToast } = useApp();
+  const { health, demoMode, sidebarOpen, toggleSidebar, toasts, dismissToast } = useApp();
   const inv = useInvestigation();
+  const visibleNav = NAV.filter((item) => {
+    if (!demoMode) return true;
+    if ("group" in item) return false;
+    return item.to === "/" || item.to === "/chat";
+  });
+
+  async function handleLogout() {
+    try {
+      await auth.logout();
+    } finally {
+      window.location.assign("/login");
+    }
+  }
 
   return (
     <>
@@ -31,7 +45,7 @@ export default function Layout() {
           </div>
 
           <nav className="sidebar-nav">
-            {NAV.map((item, i) =>
+            {visibleNav.map((item, i) =>
               "group" in item ? (
                 <div key={i} className="nav-group-label">{item.group}</div>
               ) : (
@@ -50,6 +64,10 @@ export default function Layout() {
           </nav>
 
           <div className="sidebar-bottom">
+            <button className="sidebar-logout" type="button" onClick={handleLogout}>
+              <span className="nav-icon">{"\u21AA"}</span>
+              <span className="nav-label">退出</span>
+            </button>
             <div className="sidebar-kbd">{"\u2318"}K 命令面板</div>
           </div>
         </aside>
