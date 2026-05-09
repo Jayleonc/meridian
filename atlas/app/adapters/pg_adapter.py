@@ -79,6 +79,7 @@ async def _ensure_tables() -> None:
         semantic      TEXT         NOT NULL DEFAULT '',
         source        VARCHAR(16)  NOT NULL DEFAULT 'auto',
         confirmed     BOOLEAN      NOT NULL DEFAULT FALSE,
+        status        VARCHAR(16)  NOT NULL DEFAULT 'pending',
         updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
         UNIQUE (database_name, table_name, column_name)
     );
@@ -119,6 +120,8 @@ async def _ensure_tables() -> None:
     """
     async with _pool.acquire() as conn:
         await conn.execute(ddl)
+        await conn.execute("ALTER TABLE semantic_annotation ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'pending'")
+        await conn.execute("UPDATE semantic_annotation SET status = 'confirmed' WHERE confirmed = TRUE AND status = 'pending'")
     logger.info("数据库表结构已就绪")
 
 
@@ -247,12 +250,13 @@ async def save_annotation(
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO semantic_annotation (id, database_name, table_name, column_name, semantic, source, confirmed, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+            INSERT INTO semantic_annotation (id, database_name, table_name, column_name, semantic, source, confirmed, status, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
             ON CONFLICT (database_name, table_name, column_name) DO UPDATE SET
                 semantic   = EXCLUDED.semantic,
                 source     = EXCLUDED.source,
                 confirmed  = EXCLUDED.confirmed,
+                status     = EXCLUDED.status,
                 updated_at = now()
             RETURNING id
             """,
@@ -263,6 +267,7 @@ async def save_annotation(
             semantic,
             source,
             confirmed,
+            "confirmed" if confirmed else "pending",
         )
     return str(row["id"]) if row else aid
 
@@ -276,7 +281,7 @@ async def get_annotations(database_name: str, table_name: str | None = None) -> 
         if table_name:
             rows = await conn.fetch(
                 """
-                SELECT id, database_name, table_name, column_name, semantic, source, confirmed, updated_at
+                SELECT id, database_name, table_name, column_name, semantic, source, confirmed, status, updated_at
                 FROM semantic_annotation
                 WHERE database_name = $1 AND table_name = $2
                 ORDER BY table_name, column_name
@@ -287,7 +292,7 @@ async def get_annotations(database_name: str, table_name: str | None = None) -> 
         else:
             rows = await conn.fetch(
                 """
-                SELECT id, database_name, table_name, column_name, semantic, source, confirmed, updated_at
+                SELECT id, database_name, table_name, column_name, semantic, source, confirmed, status, updated_at
                 FROM semantic_annotation
                 WHERE database_name = $1
                 ORDER BY table_name, column_name
@@ -306,6 +311,7 @@ async def search_annotations(
     q: str = "",
     source: str = "",
     confirmed: bool | None = None,
+    status: str = "",
     limit: int = 100,
     offset: int = 0,
 ) -> dict:
@@ -342,6 +348,11 @@ async def search_annotations(
         args.append(confirmed)
         arg_idx += 1
 
+    if status:
+        conditions.append(f"status = ${arg_idx}")
+        args.append(status)
+        arg_idx += 1
+
     where_sql = " AND ".join(conditions)
     async with pool.acquire() as conn:
         total = await conn.fetchval(
@@ -350,7 +361,7 @@ async def search_annotations(
         )
         rows = await conn.fetch(
             f"""
-            SELECT id, database_name, table_name, column_name, semantic, source, confirmed, updated_at
+            SELECT id, database_name, table_name, column_name, semantic, source, confirmed, status, updated_at
             FROM semantic_annotation
             WHERE {where_sql}
             ORDER BY table_name, column_name
@@ -375,7 +386,7 @@ async def get_annotation(database_name: str, table_name: str, column_name: str) 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, database_name, table_name, column_name, semantic, source, confirmed, updated_at
+            SELECT id, database_name, table_name, column_name, semantic, source, confirmed, status, updated_at
             FROM semantic_annotation
             WHERE database_name = $1 AND table_name = $2 AND column_name = $3
             """,
@@ -391,16 +402,16 @@ async def get_annotation(database_name: str, table_name: str, column_name: str) 
 
 
 async def list_pending_annotations(database_name: str) -> list[dict]:
-    """列出所有 confirmed=False 的标注（待人工确认，含 auto/ai 来源）。"""
+    """列出所有 pending 标注（待人工确认，含 auto/ai 来源）。"""
     pool = get_pool()
     if not pool:
         return []
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, database_name, table_name, column_name, semantic, source, confirmed, updated_at
+            SELECT id, database_name, table_name, column_name, semantic, source, confirmed, status, updated_at
             FROM semantic_annotation
-            WHERE database_name = $1 AND confirmed = FALSE
+            WHERE database_name = $1 AND status = 'pending'
             ORDER BY table_name, column_name
             """,
             database_name,
@@ -414,37 +425,30 @@ async def list_pending_annotations(database_name: str) -> list[dict]:
 async def confirm_annotation(
     database_name: str, table_name: str, column_name: str, confirmed: bool = True
 ) -> bool:
-    """确认或拒绝标注。confirmed=False 时删除该标注。"""
+    """确认或驳回标注。驳回不删除，保留为 rejected 以便恢复。"""
     pool = get_pool()
     if not pool:
         return False
     async with pool.acquire() as conn:
-        if not confirmed:
-            result = await conn.execute(
-                """
-                DELETE FROM semantic_annotation
-                WHERE database_name = $1 AND table_name = $2 AND column_name = $3
-                """,
-                database_name,
-                table_name,
-                column_name,
-            )
-            return int(result.split()[-1]) > 0
         result = await conn.execute(
             """
             UPDATE semantic_annotation
-            SET confirmed = TRUE, updated_at = now()
+            SET confirmed = $4,
+                status = $5,
+                updated_at = now()
             WHERE database_name = $1 AND table_name = $2 AND column_name = $3
             """,
             database_name,
             table_name,
             column_name,
+            confirmed,
+            "confirmed" if confirmed else "rejected",
         )
         return int(result.split()[-1]) > 0
 
 
 async def confirm_annotations(annotations: list[dict], confirmed: bool = True) -> dict:
-    """批量确认或驳回标注。confirmed=False 时删除对应标注。"""
+    """批量确认或驳回标注。驳回不删除，保留为 rejected。"""
     pool = get_pool()
     if not pool:
         return {"success": 0, "failed": len(annotations)}
@@ -460,27 +464,20 @@ async def confirm_annotations(annotations: list[dict], confirmed: bool = True) -
                 if not database_name or not table_name or not column_name:
                     failed += 1
                     continue
-                if confirmed:
-                    result = await conn.execute(
-                        """
-                        UPDATE semantic_annotation
-                        SET confirmed = TRUE, updated_at = now()
-                        WHERE database_name = $1 AND table_name = $2 AND column_name = $3
-                        """,
-                        database_name,
-                        table_name,
-                        column_name,
-                    )
-                else:
-                    result = await conn.execute(
-                        """
-                        DELETE FROM semantic_annotation
-                        WHERE database_name = $1 AND table_name = $2 AND column_name = $3
-                        """,
-                        database_name,
-                        table_name,
-                        column_name,
-                    )
+                result = await conn.execute(
+                    """
+                    UPDATE semantic_annotation
+                    SET confirmed = $4,
+                        status = $5,
+                        updated_at = now()
+                    WHERE database_name = $1 AND table_name = $2 AND column_name = $3
+                    """,
+                    database_name,
+                    table_name,
+                    column_name,
+                    confirmed,
+                    "confirmed" if confirmed else "rejected",
+                )
                 changed = int(result.split()[-1])
                 if changed:
                     success += changed
@@ -505,38 +502,37 @@ def _annotation_row_to_dict(row) -> dict:
         "semantic": row["semantic"],
         "source": row["source"],
         "confirmed": row["confirmed"],
+        "status": row["status"],
         "updated_at": row["updated_at"],
     }
 
 
 async def get_annotation_stats(database_name: str) -> dict:
-    """获取标注统计：总数、已确认、待确认、各来源数量。"""
+    """获取标注统计：总数、已确认、待确认、已驳回、各来源数量。"""
     pool = get_pool()
     if not pool:
         return {}
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT source, confirmed, COUNT(*) as cnt
+            SELECT source, confirmed, status, COUNT(*) as cnt
             FROM semantic_annotation
             WHERE database_name = $1
-            GROUP BY source, confirmed
+            GROUP BY source, confirmed, status
             """,
             database_name,
         )
-    stats = {"total": 0, "confirmed": 0, "pending": 0, "by_source": {}}
+    stats = {"total": 0, "confirmed": 0, "pending": 0, "rejected": 0, "by_source": {}}
     for r in rows:
         count = r["cnt"]
         source = r["source"]
+        status = r["status"] or ("confirmed" if r["confirmed"] else "pending")
         stats["total"] += count
-        if r["confirmed"]:
-            stats["confirmed"] += count
-        else:
-            stats["pending"] += count
+        if status in {"confirmed", "pending", "rejected"}:
+            stats[status] += count
         if source not in stats["by_source"]:
-            stats["by_source"][source] = {"confirmed": 0, "pending": 0}
-        key = "confirmed" if r["confirmed"] else "pending"
-        stats["by_source"][source][key] = count
+            stats["by_source"][source] = {"confirmed": 0, "pending": 0, "rejected": 0}
+        stats["by_source"][source][status] = count
     return stats
 
 

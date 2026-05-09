@@ -91,6 +91,7 @@ export default function NexusPage() {
         tool.method,
         tool.path,
         tool.description,
+        toolPurpose(tool),
       ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(needle));
@@ -159,12 +160,12 @@ export default function NexusPage() {
             </div>
             <div>
               <div className="label-with-help mb-xs">
-                <span className="field-label inline-label">刷新策略 Reload</span>
-                <HelpTip text="FastMCP 当前适合追加新工具名；修改已有工具 schema 或 adapter 时建议重启 Nexus，并让客户端重新 tools/list。" />
+                <span className="field-label inline-label">发现同步 Discovery Sync</span>
+                <HelpTip text="MCP 协议支持 notifications/tools/list_changed，客户端收到后应重新 tools/list。Nexus 当前还未发这个通知；现阶段修改已有工具 schema 或 adapter 时使用重启作为 fallback。" />
               </div>
               <div className="nexus-policy-main">
                 <span className={status?.reload.enabled ? "badge badge-emerald" : "badge badge-dim"}>
-                  {status?.reload.enabled ? "热刷新 enabled" : "重启 restart"}
+                  {status?.reload.enabled ? "通知待接入" : "重启 fallback"}
                 </span>
                 <span className="mono muted">{status?.reload.strategy ?? "restart_or_additive_reload"}</span>
               </div>
@@ -207,6 +208,14 @@ export default function NexusPage() {
                 </div>
               ) : filteredTools.length > 0 ? (
                 <table className="dtable nexus-tools-table">
+                  <colgroup>
+                    <col className="tool-col" />
+                    <col className="service-col" />
+                    <col className="status-col" />
+                    <col className="exposure-col" />
+                    <col className="risk-col" />
+                    <col className="adapter-col" />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th>工具 Tool</th>
@@ -224,15 +233,21 @@ export default function NexusPage() {
                         className={selected?.name === tool.name ? "selected-row" : ""}
                         onClick={() => setSelectedName(tool.name)}
                       >
-                        <td>
-                          <div className="mono table-strong">{tool.name}</div>
-                          <div className="table-sub">{tool.method ?? "—"} {tool.path ?? ""}</div>
+                        <td className="tool-cell">
+                          <div className="tool-main-line">
+                            <span className="mono table-strong tool-name" title={tool.name}>{tool.name}</span>
+                            <span className="badge badge-dim method-chip">{tool.method ?? "—"}</span>
+                          </div>
+                          <div className="table-sub table-ellipsis" title={tool.path ?? ""}>{tool.path ?? ""}</div>
+                          <div className="table-sub table-ellipsis" title={toolPurpose(tool)}>
+                            {toolPurpose(tool)}
+                          </div>
                         </td>
-                        <td>{tool.serviceName}</td>
-                        <td><StatusBadge tool={tool} /></td>
-                        <td><ExposureBadges tool={tool} compact /></td>
-                        <td><span className="badge badge-dim">{tool.risk ?? "read"}</span></td>
-                        <td><span className="badge badge-violet">{tool.adapter}</span></td>
+                        <td className="nowrap-cell">{tool.serviceName}</td>
+                        <td className="nowrap-cell"><StatusBadge tool={tool} /></td>
+                        <td className="nowrap-cell"><ExposureBadges tool={tool} compact /></td>
+                        <td className="nowrap-cell"><span className="badge badge-dim">{tool.risk ?? "read"}</span></td>
+                        <td className="nowrap-cell"><span className="badge badge-violet">{tool.adapter}</span></td>
                       </tr>
                     ))}
                   </tbody>
@@ -254,7 +269,7 @@ export default function NexusPage() {
 
 function Metric({ label, value, tone, title }: { label: string; value: string | number; tone: "teal" | "emerald" | "amber" | "violet"; title: string }) {
   return (
-    <div className="card nexus-help-card" title={title}>
+    <div className="card nexus-help-card">
       <div className="stat">
         <div className={`stat-val ${tone}`}>{value}</div>
         <div className="stat-label label-with-help center-label">
@@ -288,17 +303,17 @@ function ToolDetail({ tool }: { tool?: ToolRow }) {
       </div>
       <div className="card-body">
         <div className="detail-title mono">{tool.name}</div>
-        <div className="detail-desc">{tool.description || "—"}</div>
+        <div className="detail-desc">{toolPurpose(tool)}</div>
 
         <div className="detail-grid mt-md">
           <Field label="服务 Service" value={`${tool.serviceName} ${tool.serviceVersion}`} />
-          <Field label="基础地址 Base URL" value={tool.serviceBaseUrl} mono />
-          <Field label="适配器 Adapter" value={tool.adapter} />
           <Field label="版本 Version" value={tool.version ?? "v1"} />
           <Field label="方法 Method" value={tool.method ?? "—"} />
-          <Field label="路径 Path" value={tool.path ?? "—"} mono />
+          <Field label="适配器 Adapter" value={tool.adapter} />
           <Field label="超时 Timeout" value={`${tool.timeout_seconds ?? 30}s / ${tool.downstream_timeout_seconds ?? tool.timeout_seconds ?? 30}s`} />
           <Field label="响应上限 Max Response" value={`${tool.max_response_bytes ?? 12000} bytes`} />
+          <Field label="路径 Path" value={tool.path ?? "—"} mono wide />
+          <Field label="基础地址 Base URL" value={tool.serviceBaseUrl} mono wide />
         </div>
 
         <div className="detail-section">
@@ -350,21 +365,21 @@ function ToolDetail({ tool }: { tool?: ToolRow }) {
           </div>
         </div>
 
-        <div className="detail-section">
-          <div className="label-with-help mb-sm">
+        <details className="detail-section detail-collapse">
+          <summary className="label-with-help mb-sm">
             <span className="field-label inline-label">审批信息 Approval</span>
             <HelpTip text="当前是只读展示。后续 Console 会在这里接入 approve / reject / reload 操作。" />
-          </div>
+          </summary>
           <pre className="json-preview">{JSON.stringify(tool.approval ?? {}, null, 2)}</pre>
-        </div>
+        </details>
       </div>
     </div>
   );
 }
 
-function Field({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function Field({ label, value, mono = false, wide = false }: { label: string; value: string; mono?: boolean; wide?: boolean }) {
   return (
-    <div className="detail-field">
+    <div className={wide ? "detail-field wide" : "detail-field"}>
       <div className="field-label">{label}</div>
       <div className={mono ? "mono detail-value" : "detail-value"}>{value}</div>
     </div>
@@ -404,11 +419,31 @@ function ExposureBadges({ tool, compact = false }: { tool: ToolRow; compact?: bo
 
 function HelpTip({ text }: { text: string }) {
   return (
-    <button type="button" className="help-tip" aria-label={text} title={text}>
+    <button type="button" className="help-tip" aria-label={text}>
       ?
       <span className="help-bubble">{text}</span>
     </button>
   );
+}
+
+function toolPurpose(tool: NexusToolManifest | ToolRow): string {
+  const purpose: Record<string, string> = {
+    "atlas.health.v1": "检查 Atlas 是否在线，用于 Nexus/Console 健康检查，不给 Agent 作为诊断工具。",
+    "atlas.list_services": "列出 Atlas 发现的业务服务、部署路径、日志路径和关联数据库，帮助 Agent 理解系统边界。",
+    "atlas.search_meta": "按关键词搜索表、字段、服务和语义，用于把日志里的业务词映射到可查对象。",
+    "atlas.get_table": "读取某张表的字段、索引、注释和语义，供 Lens 建模或 Agent 判断字段含义。",
+    "probe.search_by_request_id": "按 request_id 汇总日志时间线、错误/警告和服务路径，是排查一次请求的主入口。",
+    "probe.search_logs": "按关键词、服务和时间范围搜索日志，适合 request_id 不明确时补证据。",
+    "probe.tail_errors": "查看近期错误日志，适合巡检和发现当前正在发生的问题。",
+    "probe.tail_service_logs": "查看某个服务的近期日志，适合聚焦单服务排查。",
+    "probe.list_services": "列出 Probe 当前能读取日志的服务，用于选择后续日志查询范围。",
+    "probe.context_around_match": "读取某条命中日志前后上下文，避免只看单行导致误判。",
+    "probe.search_ops_logs": "跨白名单主机搜索运维日志，适合多机器问题；当前仍受 ops 配置约束。",
+    "lens.list_entities": "列出已经人工治理并启用的业务实体；Agent 只能发现这些实体。",
+    "lens.describe_entity": "查看业务实体字段、敏感性、可筛选/可排序策略和查询约束。",
+    "lens.query": "执行 Lens 只读 DSL 查询；明细查询必须有筛选或时间范围，Preview 只返回安全样本。",
+  };
+  return purpose[tool.name] || tool.description || "这个工具尚未补充中文用途说明。";
 }
 
 function flattenTools(registry: NexusRegistry | null, dynamicNames: string[]): ToolRow[] {

@@ -45,6 +45,8 @@ export default function AtlasPage() {
   const [annotationStatus, setAnnotationStatus] = useState("");
   const [annotationLoading, setAnnotationLoading] = useState(false);
   const [selectedAnnotationKeys, setSelectedAnnotationKeys] = useState<string[]>([]);
+  const [editingAnnotationKey, setEditingAnnotationKey] = useState("");
+  const [editingSemantic, setEditingSemantic] = useState("");
   const [annotateDb, setAnnotateDb] = useState("");
   const [annotateTable, setAnnotateTable] = useState("");
   const [annotateCol, setAnnotateCol] = useState("");
@@ -116,17 +118,11 @@ export default function AtlasPage() {
   async function loadAnnotations(db: string) {
     setAnnotationLoading(true);
     try {
-      const confirmed =
-        annotationStatus === "confirmed"
-          ? true
-          : annotationStatus === "pending"
-            ? false
-            : undefined;
       const r = await atlas.listAnnotations(db, {
         table: annotationTableFilter || undefined,
         q: annotationQuery.trim() || undefined,
         source: annotationSource || undefined,
-        confirmed,
+        status: annotationStatus || undefined,
         limit: annotationPageSize,
         offset: (annotationPage - 1) * annotationPageSize,
       });
@@ -192,7 +188,7 @@ export default function AtlasPage() {
         column: annotationColumn(ann),
         confirmed,
       });
-      toast("success", confirmed ? "已确认" : "已驳回");
+      toast("success", confirmed ? "已确认，可被 Lens/Agent 作为可信语义使用" : "已标记为驳回，记录仍保留，可随时恢复");
       await loadAnnotations(annotationDatabase(ann));
     } catch {
       toast("error", "操作失败");
@@ -211,7 +207,7 @@ export default function AtlasPage() {
         })),
         confirmed,
       });
-      toast("success", confirmed ? `已确认 ${r.success} 条` : `已驳回 ${r.success} 条`);
+      toast("success", confirmed ? `已确认 ${r.success} 条` : `已标记驳回 ${r.success} 条，记录仍保留`);
       await loadAnnotations(selectedDb);
     } catch {
       toast("error", "批量操作失败");
@@ -293,6 +289,15 @@ export default function AtlasPage() {
     return `${annotationDatabase(ann)}.${annotationTable(ann)}.${annotationColumn(ann)}`;
   }
 
+  function AtlasHelpTip({ text }: { text: string }) {
+    return (
+      <button type="button" className="help-tip" aria-label={text}>
+        ?
+        <span className="help-bubble">{text}</span>
+      </button>
+    );
+  }
+
   function toggleAnnotationSelection(key: string) {
     setSelectedAnnotationKeys((prev) =>
       prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
@@ -307,12 +312,60 @@ export default function AtlasPage() {
     }
   }
 
+  function beginEditAnnotation(ann: Annotation) {
+    setEditingAnnotationKey(annotationKey(ann));
+    setEditingSemantic(ann.semantic);
+  }
+
+  async function saveAnnotationEdit(ann: Annotation) {
+    const nextSemantic = editingSemantic.trim();
+    if (!nextSemantic) {
+      toast("error", "语义不能为空");
+      return;
+    }
+    try {
+      await atlas.annotate({
+        database: annotationDatabase(ann),
+        table: annotationTable(ann),
+        column: annotationColumn(ann),
+        semantic: nextSemantic,
+        source: "manual",
+        confirmed: annotationStatusOf(ann) === "confirmed",
+      });
+      setEditingAnnotationKey("");
+      setEditingSemantic("");
+      toast("success", annotationStatusOf(ann) === "confirmed" ? "已更新可信语义" : "已保存为人工语义，等待确认");
+      await loadAnnotations(annotationDatabase(ann));
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "保存失败");
+    }
+  }
+
   function applyAnnotationFilters() {
     if (annotationPage === 1) {
       void loadAnnotations(selectedDb);
     } else {
       setAnnotationPage(1);
     }
+  }
+
+  function annotationStatusOf(ann: Annotation): "pending" | "confirmed" | "rejected" {
+    return ann.status || (ann.confirmed ? "confirmed" : "pending");
+  }
+
+  function annotationStatusBadge(ann: Annotation) {
+    const status = annotationStatusOf(ann);
+    if (status === "confirmed") return { className: "badge badge-emerald", label: "已确认" };
+    if (status === "rejected") return { className: "badge badge-coral", label: "已驳回" };
+    return { className: "badge badge-warn", label: "待确认" };
+  }
+
+  function annotationSourceText(source: string) {
+    if (source === "auto") return "自动推断：来自字段注释或命名规则，不是人工确认。";
+    if (source === "manual") return "人工标注：由 Console 或人工接口写入。";
+    if (source === "ai") return "AI 建议：由模型生成，需要人工确认。";
+    if (source === "rule") return "规则增强：由语义规则匹配生成，需要人工确认。";
+    return "未知来源。";
   }
 
   return (
@@ -334,10 +387,14 @@ export default function AtlasPage() {
             <button className={`tab-btn ${tab === "schemas" ? "active" : ""}`} onClick={() => setTab("schemas")}>
               Schema 浏览
             </button>
-            <button className={`tab-btn ${tab === "annotations" ? "active" : ""}`} onClick={() => setTab("annotations")}>
+            <button
+              className={`tab-btn ${tab === "annotations" ? "active" : ""}`}
+              onClick={() => setTab("annotations")}
+              title="语义标注用于给数据库字段补充业务含义，例如把 phone 标成用户手机号，供 Atlas 搜索、Lens entity 生成和 Agent 理解字段使用。"
+            >
               语义标注
-              {annotations.filter((a) => !a.confirmed).length > 0 && (
-                <span className="tab-count">{annotations.filter((a) => !a.confirmed).length}</span>
+              {annotations.filter((a) => annotationStatusOf(a) === "pending").length > 0 && (
+                <span className="tab-count">{annotations.filter((a) => annotationStatusOf(a) === "pending").length}</span>
               )}
             </button>
             <button className={`tab-btn ${tab === "services" ? "active" : ""}`} onClick={() => setTab("services")}>
@@ -621,30 +678,47 @@ export default function AtlasPage() {
         {/* ════ ANNOTATIONS TAB ════ */}
         {tab === "annotations" && (
           <div className="fade-up">
+            <div className="card mb-md help-card">
+              <div className="card-body" style={{ fontSize: 12, color: "var(--t3)", lineHeight: 1.7 }}>
+                <div className="label-with-help mb-xs">
+                  <span className="field-label inline-label">语义标注 Semantic Annotation</span>
+                  <AtlasHelpTip text="给数据库字段补充业务含义，例如 corp_id=企业ID、mobile=用户手机号。Atlas 搜索、Lens entity 生成和 Agent 诊断都会优先使用已确认语义。" />
+                </div>
+                <div className="annotation-explainer">
+                  <span><b style={{ color: "var(--emerald)" }}>确认</b> = 接受该字段语义，作为可信语义进入后续 Lens/Agent。</span>
+                  <span><b style={{ color: "var(--coral)" }}>驳回</b> = 标记为不采纳，不会删除记录，可恢复确认或重新编辑。</span>
+                  <span><b style={{ color: "var(--teal)" }}>语义来源</b> = MySQL 注释优先，其次是 Atlas 字段命名规则自动推断。</span>
+                </div>
+              </div>
+            </div>
+
             {/* Add annotation form */}
             <div className="card mb-md">
-              <div className="card-head"><h3>新增语义标注</h3></div>
+              <div className="card-head">
+                <h3>新增语义标注</h3>
+                <AtlasHelpTip text="手工给某个字段写业务语义。保存后默认进入待确认列表，确认后才作为可信语义使用。" />
+              </div>
               <div className="card-body">
                 <div className="row gap-sm mb-sm">
                   <div style={{ flex: 1 }}>
-                    <div className="field-label mb-sm">数据库</div>
+                    <div className="field-label mb-sm" title="字段所在的业务数据库。">数据库</div>
                     <select className="input" value={annotateDb} onChange={(e) => setAnnotateDb(e.target.value)}>
                       <option value="">请选择...</option>
                       {databases.map((d) => <option key={d.database} value={d.database}>{d.database}</option>)}
                     </select>
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div className="field-label mb-sm">表</div>
+                    <div className="field-label mb-sm" title="字段所在的物理表名。">表</div>
                     <input className="input" value={annotateTable} onChange={(e) => setAnnotateTable(e.target.value)} placeholder="table_name" />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div className="field-label mb-sm">字段</div>
+                    <div className="field-label mb-sm" title="需要补充业务含义的物理字段名。">字段</div>
                     <input className="input" value={annotateCol} onChange={(e) => setAnnotateCol(e.target.value)} placeholder="column_name" />
                   </div>
                 </div>
                 <div className="row gap-sm">
                   <div style={{ flex: 1 }}>
-                    <div className="field-label mb-sm">语义说明</div>
+                    <div className="field-label mb-sm" title="用业务语言描述这个字段，例如 企业ID、客户手机号、订单创建时间。">语义说明</div>
                     <input
                       className="input"
                       value={annotateSemantic}
@@ -654,7 +728,7 @@ export default function AtlasPage() {
                     />
                   </div>
                   <div style={{ paddingTop: 22 }}>
-                    <button className="btn btn-primary" onClick={handleAnnotate} disabled={annotating || !annotateDb || !annotateTable || !annotateCol || !annotateSemantic}>
+                    <button className="btn btn-primary" onClick={handleAnnotate} disabled={annotating || !annotateDb || !annotateTable || !annotateCol || !annotateSemantic} title="保存为语义候选，后续可确认或驳回。">
                       {annotating ? <><span className="spinner" /> 保存中</> : "保存"}
                     </button>
                   </div>
@@ -726,6 +800,7 @@ export default function AtlasPage() {
                     <option value="">全部状态</option>
                     <option value="pending">待确认</option>
                     <option value="confirmed">已确认</option>
+                    <option value="rejected">已驳回</option>
                   </select>
                   <button className="btn btn-primary btn-sm" onClick={applyAnnotationFilters} disabled={!selectedDb}>
                     搜索
@@ -736,6 +811,7 @@ export default function AtlasPage() {
                     className="btn btn-ghost btn-sm"
                     onClick={() => handleBatchConfirm(true)}
                     disabled={selectedAnnotationKeys.length === 0}
+                    title="批量确认选中的语义候选，让它们进入可信语义层。"
                   >
                     批量确认 {selectedAnnotationKeys.length || ""}
                   </button>
@@ -743,6 +819,7 @@ export default function AtlasPage() {
                     className="btn btn-danger btn-sm"
                     onClick={() => handleBatchConfirm(false)}
                     disabled={selectedAnnotationKeys.length === 0}
+                    title="批量标记为驳回；不会删除记录，之后仍可筛选已驳回并恢复确认。"
                   >
                     批量驳回 {selectedAnnotationKeys.length || ""}
                   </button>
@@ -773,15 +850,17 @@ export default function AtlasPage() {
                           />
                         </th>
                         <th>表.字段</th>
-                        <th>语义</th>
-                        <th>来源</th>
-                        <th>状态</th>
-                        <th>操作</th>
+                        <th title="字段的业务含义，供搜索、Lens entity 和 Agent 理解字段。可直接编辑。">语义</th>
+                        <th title="auto=字段注释或命名规则自动推断；manual=人工；ai=模型建议；rule=规则增强。">来源</th>
+                        <th title="待确认和已驳回都不会作为可信语义；已确认后才作为可信语义使用。">状态</th>
+                        <th title="确认代表采纳；驳回只标记不删除；编辑可覆盖语义。">操作</th>
                       </tr>
                     </thead>
                     <tbody>
                       {annotations.map((ann) => {
                         const key = annotationKey(ann);
+                        const statusBadge = annotationStatusBadge(ann);
+                        const isEditing = editingAnnotationKey === key;
                         return (
                         <tr key={key}>
                           <td>
@@ -792,26 +871,65 @@ export default function AtlasPage() {
                             />
                           </td>
                           <td className="mono">{annotationTable(ann)}.{annotationColumn(ann)}</td>
-                          <td style={{ color: "var(--teal)" }}>{ann.semantic}</td>
-                          <td><span className={`badge ${ann.source === "manual" ? "badge-amber" : ann.source === "ai" ? "badge-violet" : "badge-dim"}`}>{ann.source}</span></td>
                           <td>
-                            <span className={`badge ${ann.confirmed ? "badge-emerald" : "badge-warn"}`}>
-                              {ann.confirmed ? "已确认" : "待确认"}
+                            {isEditing ? (
+                              <input
+                                className="input annotation-edit-input"
+                                value={editingSemantic}
+                                onChange={(event) => setEditingSemantic(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") void saveAnnotationEdit(ann);
+                                  if (event.key === "Escape") setEditingAnnotationKey("");
+                                }}
+                              />
+                            ) : (
+                              <span className="annotation-semantic">{ann.semantic}</span>
+                            )}
+                          </td>
+                          <td>
+                            <span
+                              className={`badge ${ann.source === "manual" ? "badge-amber" : ann.source === "ai" ? "badge-violet" : "badge-dim"}`}
+                              title={annotationSourceText(ann.source)}
+                            >
+                              {ann.source}
                             </span>
                           </td>
                           <td>
-                            {!ann.confirmed && (
-                              <div className="row gap-xs">
-                                <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: "2px 6px", color: "var(--emerald)" }}
+                            <span className={statusBadge.className}>
+                              {statusBadge.label}
+                            </span>
+                          </td>
+                          <td>
+                            <div className="row gap-xs wrap">
+                              {isEditing ? (
+                                <>
+                                  <button className="btn btn-ghost btn-sm annotation-action" onClick={() => void saveAnnotationEdit(ann)}>
+                                    保存
+                                  </button>
+                                  <button className="btn btn-ghost btn-sm annotation-action" onClick={() => setEditingAnnotationKey("")}>
+                                    取消
+                                  </button>
+                                </>
+                              ) : (
+                                <button className="btn btn-ghost btn-sm annotation-action" onClick={() => beginEditAnnotation(ann)}>
+                                  编辑
+                                </button>
+                              )}
+                              {annotationStatusOf(ann) !== "confirmed" && (
+                                <button className="btn btn-ghost btn-sm annotation-action" style={{ color: "var(--emerald)" }}
+                                  title="确认后，该语义会成为可信字段含义，供 Atlas 搜索、Lens 生成 entity 和 Agent 理解字段使用。"
                                   onClick={() => handleConfirm(ann, true)}>
                                   确认
                                 </button>
-                                <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: "2px 6px", color: "var(--coral)" }}
+                              )}
+                              {annotationStatusOf(ann) !== "rejected" && (
+                                <button className="btn btn-ghost btn-sm annotation-action" style={{ color: "var(--coral)" }}
+                                  title="驳回只会标记为 rejected，不会删除记录；之后可筛选已驳回并恢复确认。"
                                   onClick={() => handleConfirm(ann, false)}>
                                   驳回
                                 </button>
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );

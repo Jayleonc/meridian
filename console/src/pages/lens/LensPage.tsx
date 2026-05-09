@@ -10,6 +10,7 @@ import {
   type EntityDetail,
   type QueryResult,
   type FilterCondition,
+  type TableSummary,
 } from "../../api/client";
 
 export default function LensPage() {
@@ -23,9 +24,16 @@ export default function LensPage() {
   const [entityLoading, setEntityLoading] = useState(false);
   const [error, setError] = useState("");
   const [atlasDatabases, setAtlasDatabases] = useState<Array<{ database: string; table_count: number }>>([]);
+  const [showImportPanel, setShowImportPanel] = useState(false);
+  const [importDatabase, setImportDatabase] = useState("");
+  const [atlasTables, setAtlasTables] = useState<TableSummary[]>([]);
+  const [importTableQuery, setImportTableQuery] = useState("");
+  const [selectedImportTables, setSelectedImportTables] = useState<string[]>([]);
+  const [loadingAtlasTables, setLoadingAtlasTables] = useState(false);
   const [entityQuery, setEntityQuery] = useState("");
   const [entityDatabase, setEntityDatabase] = useState("");
   const [entityMenu, setEntityMenu] = useState("");
+  const [selectedEntityNames, setSelectedEntityNames] = useState<string[]>([]);
   const [fieldQuery, setFieldQuery] = useState("");
 
   // Query state
@@ -40,6 +48,7 @@ export default function LensPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [showSql, setShowSql] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [savingEntity, setSavingEntity] = useState(false);
 
   useEffect(() => {
     void bootLens();
@@ -74,8 +83,11 @@ export default function LensPage() {
 
   async function loadEntities() {
     try {
-      const r = await lens.listEntities();
+      const r = await lens.listEntities(true);
       setEntities(r.entity);
+      setSelectedEntityNames((current) =>
+        current.filter((name) => r.entity.some((entity) => entity.name === name))
+      );
       setError("");
       return r.entity;
     } catch {
@@ -85,11 +97,24 @@ export default function LensPage() {
   }
 
   async function handleImportFromAtlas() {
+    if (!importDatabase) {
+      toast("info", "先选择一个数据库");
+      return;
+    }
+    if (selectedImportTables.length === 0) {
+      toast("info", "至少选择一张表，避免一次性导入过多实体");
+      return;
+    }
     setImporting(true);
     try {
-      const r = await lens.importFromAtlas();
+      const r = await lens.importFromAtlas({
+        database: importDatabase,
+        tables: selectedImportTables,
+        enabled: false,
+      });
       if (r.imported > 0) {
-        toast("success", `已从 Atlas 导入 ${r.imported} 个实体，跳过 ${r.skipped} 个`);
+        toast("success", `已导入 ${r.imported} 个草稿实体，确认后 Agent 才能使用`);
+        setSelectedImportTables([]);
         await loadEntities();
       } else if (r.skipped > 0) {
         toast("info", `${r.skipped} 个实体已存在；需要更新时再使用覆盖导入`);
@@ -100,6 +125,68 @@ export default function LensPage() {
       toast("error", e instanceof Error ? e.message : "导入失败，请确认 Atlas 已运行");
     }
     setImporting(false);
+  }
+
+  async function loadAtlasTables(database: string) {
+    setImportDatabase(database);
+    setSelectedImportTables([]);
+    setAtlasTables([]);
+    if (!database) return;
+
+    setLoadingAtlasTables(true);
+    try {
+      const r = await atlas.listTables(database);
+      setAtlasTables(r.tables);
+    } catch {
+      toast("error", "读取 Atlas 表列表失败");
+    }
+    setLoadingAtlasTables(false);
+  }
+
+  function toggleImportTable(name: string) {
+    setSelectedImportTables((current) =>
+      current.includes(name)
+        ? current.filter((item) => item !== name)
+        : [...current, name]
+    );
+  }
+
+  function toggleEntitySelection(name: string) {
+    setSelectedEntityNames((current) =>
+      current.includes(name)
+        ? current.filter((item) => item !== name)
+        : [...current, name]
+    );
+  }
+
+  function toggleCurrentEntities() {
+    const currentNames = filteredEntities.map((entity) => entity.name);
+    const allSelected = currentNames.length > 0 && currentNames.every((name) => selectedEntityNames.includes(name));
+    setSelectedEntityNames((current) =>
+      allSelected
+        ? current.filter((name) => !currentNames.includes(name))
+        : Array.from(new Set([...current, ...currentNames]))
+    );
+  }
+
+  async function batchSetAgentVisibility(enabled: boolean) {
+    if (selectedEntityNames.length === 0) return;
+    setSavingEntity(true);
+    try {
+      await Promise.all(
+        selectedEntityNames.map((name) => lens.updateEntity(name, { enabled }))
+      );
+      toast("success", enabled ? `已启用 ${selectedEntityNames.length} 个实体给 Agent` : `已将 ${selectedEntityNames.length} 个实体转为草稿`);
+      setSelectedEntityNames([]);
+      await loadEntities();
+      if (selected) {
+        const detail = await lens.describeEntity(selected.name);
+        setSelected(detail);
+      }
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "批量操作失败");
+    }
+    setSavingEntity(false);
   }
 
   async function handleDeleteEntity(name: string) {
@@ -140,6 +227,24 @@ export default function LensPage() {
       toast("error", `实体加载失败：${name}`);
     }
     setEntityLoading(false);
+  }
+
+  async function saveSelectedEntity(patch: Parameters<typeof lens.updateEntity>[1]) {
+    if (!selected) return;
+    setSavingEntity(true);
+    try {
+      const r = await lens.updateEntity(selected.name, patch);
+      setSelected(r.entity);
+      toast("success", r.entity.enabled ? "已启用，Agent 可以发现该实体" : "已保存为草稿，Agent 暂不可见");
+      await loadEntities();
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "保存失败");
+    }
+    setSavingEntity(false);
+  }
+
+  function patchField(name: string, patch: Partial<EntityDetail["fields"][string]>) {
+    void saveSelectedEntity({ fields: { [name]: patch } });
   }
 
   // ── Filter management ──
@@ -219,7 +324,7 @@ export default function LensPage() {
     };
 
     try {
-      const r = await lens.query(dsl);
+      const r = await lens.operatorQuery(dsl);
       setResult(r);
 
       pushHistory({
@@ -362,9 +467,21 @@ export default function LensPage() {
         .some((value) => value.toLowerCase().includes(query));
     });
   }, [entities, entityQuery, entityDatabase]);
+  const filteredAtlasTables = useMemo(() => {
+    const query = importTableQuery.trim().toLowerCase();
+    if (!query) return atlasTables;
+    return atlasTables.filter((table) =>
+      [table.name, table.comment, table.engine]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(query))
+    );
+  }, [atlasTables, importTableQuery]);
   const hasEffectiveFilters = filters.some((f) => f.field && f.value.trim());
   const canRunRowsQuery = queryMode !== "rows" || hasEffectiveFilters;
   const countValue = Number(result?.count ?? 0);
+  const allFilteredEntitiesSelected =
+    filteredEntities.length > 0 &&
+    filteredEntities.every((entity) => selectedEntityNames.includes(entity.name));
 
   return (
     <>
@@ -378,12 +495,102 @@ export default function LensPage() {
             <button className="btn btn-ghost btn-sm" onClick={() => setShowHistory(!showHistory)}>
               查询历史 {history.length > 0 && <span className="badge badge-dim" style={{ marginLeft: 4 }}>{history.length}</span>}
             </button>
-            <button className="btn btn-primary btn-sm" onClick={handleImportFromAtlas} disabled={importing}>
-              {importing ? <><span className="spinner" /> 导入中</> : "从 Atlas 导入"}
+            <button className="btn btn-primary btn-sm" onClick={() => setShowImportPanel((v) => !v)}>
+              从 Atlas 选择导入
             </button>
           </div>
         </div>
       </div>
+
+      {showImportPanel && (
+        <div style={{ padding: "0 28px 14px" }}>
+          <div className="card fade-up">
+            <div className="card-head">
+              <div>
+                <h3>Entity Governance · 实体治理导入</h3>
+                <div style={{ color: "var(--t4)", fontSize: 12, marginTop: 4 }}>
+                  从 Atlas 选择少量表生成 Lens 草稿；草稿不会暴露给 Agent，启用后才进入 MCP 查询面。
+                </div>
+              </div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowImportPanel(false)}>收起</button>
+            </div>
+            <div className="card-body">
+              <div className="row gap-md mb-md wrap">
+                <div style={{ width: 220 }}>
+                  <div className="field-label mb-sm">数据库 Database</div>
+                  <select className="input" value={importDatabase} onChange={(e) => void loadAtlasTables(e.target.value)}>
+                    <option value="">选择数据库...</option>
+                    {atlasDatabases.map((db) => (
+                      <option key={db.database} value={db.database}>
+                        {db.database} ({db.table_count})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ flex: 1, minWidth: 260 }}>
+                  <div className="field-label mb-sm">搜索表 Search Tables</div>
+                  <input
+                    className="input"
+                    placeholder="输入表名、注释或引擎"
+                    value={importTableQuery}
+                    onChange={(e) => setImportTableQuery(e.target.value)}
+                  />
+                </div>
+                <div style={{ alignSelf: "end" }} className="row gap-sm">
+                  <span className="badge badge-dim">{selectedImportTables.length} selected</span>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={handleImportFromAtlas}
+                    disabled={importing || !importDatabase || selectedImportTables.length === 0}
+                    title="导入后先进入草稿，需要在 Lens 详情里启用后 Agent 才能发现"
+                  >
+                    {importing ? <><span className="spinner" /> 导入中</> : "导入为草稿"}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid var(--border-0)", borderRadius: "var(--r)" }}>
+                {loadingAtlasTables ? (
+                  <div className="empty" style={{ padding: 20 }}><div className="empty-text">读取 Atlas 表列表...</div></div>
+                ) : filteredAtlasTables.length > 0 ? (
+                  <table className="dtable">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 48 }}></th>
+                        <th>表 Table</th>
+                        <th>注释 Comment</th>
+                        <th>行数 Approx</th>
+                        <th>列</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAtlasTables.slice(0, 200).map((table) => (
+                        <tr key={table.name}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={selectedImportTables.includes(table.name)}
+                              onChange={() => toggleImportTable(table.name)}
+                            />
+                          </td>
+                          <td className="mono">{table.name}</td>
+                          <td style={{ color: table.comment ? "var(--teal)" : "var(--t4)" }}>{table.comment || "-"}</td>
+                          <td className="mono">{table.row_count_approx?.toLocaleString?.() ?? table.row_count_approx}</td>
+                          <td><span className="badge badge-dim">{table.column_count}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div className="empty" style={{ padding: 20 }}>
+                    <div className="empty-text">{importDatabase ? "没有匹配的表" : "先选择一个数据库"}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="page-body" style={{ display: "flex", gap: 14, overflow: "hidden", padding: "14px 28px 28px" }}>
         {/* ── Entity list panel ── */}
@@ -413,6 +620,33 @@ export default function LensPage() {
                   </select>
                 )}
               </div>
+              <div className="row gap-sm mt-sm wrap">
+                <label className="row gap-xs" style={{ fontSize: 12, color: "var(--t3)" }} title="选择当前过滤结果，用于批量启用或转为草稿。">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredEntitiesSelected}
+                    onChange={toggleCurrentEntities}
+                  />
+                  选择当前列表
+                </label>
+                <span className="badge badge-dim">{selectedEntityNames.length} selected</span>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => void batchSetAgentVisibility(true)}
+                  disabled={savingEntity || selectedEntityNames.length === 0}
+                  title="批量启用后，Agent 可以通过 lens.list_entities 发现这些实体。"
+                >
+                  批量启用给 Agent
+                </button>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => void batchSetAgentVisibility(false)}
+                  disabled={savingEntity || selectedEntityNames.length === 0}
+                  title="批量转为草稿后，Agent 将无法发现这些实体。"
+                >
+                  批量转为草稿
+                </button>
+              </div>
             </div>
             <div className="card-body flush" style={{ flex: 1, overflowY: "auto" }}>
               {filteredEntities.length > 0 ? (
@@ -435,14 +669,26 @@ export default function LensPage() {
                       if (activeEntity !== e.name) ev.currentTarget.style.background = "transparent";
                     }}
                   >
-                    <div style={{ fontFamily: "var(--font-display)", fontWeight: 500, fontSize: 13 }}>
-                      {e.display_name || e.name}
+                    <div className="row gap-sm">
+                      <input
+                        type="checkbox"
+                        checked={selectedEntityNames.includes(e.name)}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={() => toggleEntitySelection(e.name)}
+                        title="选择此实体进行批量治理操作"
+                      />
+                      <div style={{ fontFamily: "var(--font-display)", fontWeight: 500, fontSize: 13 }}>
+                        {e.display_name || e.name}
+                      </div>
                     </div>
                     <div className="row gap-xs mt-xs" style={{ justifyContent: "space-between" }}>
                       <div className="row gap-xs">
                         <span className="badge badge-dim">{e.db_type}</span>
                         <span className="badge badge-dim">{e.field_count} 字段</span>
                         <span className="badge badge-dim">{e.database}</span>
+                        <span className={e.enabled ? "badge badge-emerald" : "badge badge-coral"}>
+                          {e.enabled ? "approved" : "draft"}
+                        </span>
                       </div>
                       <div style={{ position: "relative" }}>
                         <button
@@ -492,8 +738,8 @@ export default function LensPage() {
                   </div>
                   {entities.length === 0 && (
                     <div className="row gap-sm mt-md" style={{ justifyContent: "center" }}>
-                      <button className="btn btn-primary btn-sm" onClick={handleImportFromAtlas} disabled={importing}>
-                        {importing ? "导入中..." : "从 Atlas 导入"}
+                      <button className="btn btn-primary btn-sm" onClick={() => setShowImportPanel(true)} disabled={importing}>
+                        从 Atlas 选择导入
                       </button>
                     </div>
                   )}
@@ -553,8 +799,24 @@ export default function LensPage() {
                     </h3>
                     <span className="badge badge-teal">{selected.db_type}</span>
                     {selected.datasource && <span className="badge badge-dim">{selected.datasource}</span>}
+                    <span className={selected.enabled ? "badge badge-emerald" : "badge badge-coral"}>
+                      {selected.enabled ? "approved / Agent 可见" : "draft / Agent 不可见"}
+                    </span>
                   </div>
                   <div className="row gap-sm">
+                    <div className="entity-id-readonly" aria-label="实体 ID 来自 Atlas 数据库和表名，不允许修改">
+                      <span className="entity-id-label">实体 ID</span>
+                      <span className="mono entity-id-value">{selected.name}</span>
+                      <span className="badge badge-dim">不可修改</span>
+                    </div>
+                    <button
+                      className={selected.enabled ? "btn btn-ghost btn-sm" : "btn btn-primary btn-sm"}
+                      onClick={() => void saveSelectedEntity({ enabled: !selected.enabled })}
+                      disabled={savingEntity}
+                      title={selected.enabled ? "停用后 Agent 将不再发现该实体" : "启用后 Agent 可以通过 Lens MCP 使用该实体"}
+                    >
+                      {selected.enabled ? "停用" : "启用给 Agent"}
+                    </button>
                     <input
                       className="input"
                       style={{ width: 220 }}
@@ -574,10 +836,10 @@ export default function LensPage() {
                         <th>字段</th>
                         <th>类型</th>
                         <th>语义</th>
-                        <th style={{ textAlign: "center" }}>可筛选</th>
-                        <th style={{ textAlign: "center" }}>可排序</th>
-                        <th style={{ textAlign: "center" }}>敏感</th>
-                        <th>操作</th>
+                        <th style={{ textAlign: "center" }} title="治理配置：是否允许这个字段出现在 filter 条件中。">可筛选</th>
+                        <th style={{ textAlign: "center" }} title="治理配置：是否允许用这个字段排序。">可排序</th>
+                        <th style={{ textAlign: "center" }} title="治理配置：敏感字段默认不返回，查询结果会尽量脱敏。">敏感</th>
+                        <th title="默认安全字段影响 Preview 和未指定返回字段时的结果；本次查询字段只影响当前页面查询。">治理 / 本次查询</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -590,20 +852,38 @@ export default function LensPage() {
                           <td style={{ color: f.semantic ? "var(--teal)" : "var(--t4)", fontSize: 12 }}>
                             {f.semantic || "\u2014"}
                           </td>
-                          <td style={{ textAlign: "center" }}>{f.filterable ? "\u2713" : ""}</td>
-                          <td style={{ textAlign: "center" }}>{f.sortable ? "\u2713" : ""}</td>
                           <td style={{ textAlign: "center" }}>
-                            {f.sensitive && <span className="badge badge-coral">是</span>}
+                            <button className={`badge ${f.filterable ? "badge-teal" : "badge-dim"}`} style={{ border: "none", cursor: "pointer" }} title={f.filterable ? "点击后禁止该字段作为筛选条件" : "点击后允许该字段作为筛选条件"} onClick={() => patchField(f.name, { filterable: !f.filterable })}>
+                              {f.filterable ? "是" : "否"}
+                            </button>
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            <button className={`badge ${f.sortable ? "badge-teal" : "badge-dim"}`} style={{ border: "none", cursor: "pointer" }} title={f.sortable ? "点击后禁止该字段排序" : "点击后允许该字段排序"} onClick={() => patchField(f.name, { sortable: !f.sortable })}>
+                              {f.sortable ? "是" : "否"}
+                            </button>
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            <button className={`badge ${f.sensitive ? "badge-coral" : "badge-dim"}`} style={{ border: "none", cursor: "pointer" }} title={f.sensitive ? "点击后取消敏感标记" : "点击后标记为敏感，并从默认返回中移除"} onClick={() => patchField(f.name, { sensitive: !f.sensitive, default_visible: f.sensitive ? f.default_visible : false })}>
+                              {f.sensitive ? "是" : "否"}
+                            </button>
                           </td>
                           <td>
                             <div className="row gap-xs">
+                              <button
+                                className={`btn btn-ghost btn-sm`}
+                                style={{ fontSize: 10, padding: "2px 6px" }}
+                                onClick={() => patchField(f.name, { default_visible: !f.default_visible })}
+                                title={f.default_visible ? "从默认安全返回字段中移除；Preview 和默认查询不会返回它" : "加入默认安全返回字段；Preview 和默认查询会返回它"}
+                              >
+                                {f.default_visible ? "移出默认字段" : "加入默认字段"}
+                              </button>
                               {f.filterable && (
-                                <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: "2px 6px" }} onClick={() => addFieldFilter(f.name)}>
-                                  筛选
+                                <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: "2px 6px" }} title="把这个字段加入下方筛选条件，需要填写筛选值后才能执行明细查询" onClick={() => addFieldFilter(f.name)}>
+                                  加为筛选条件
                                 </button>
                               )}
-                              <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: "2px 6px" }} onClick={() => toggleField(f.name)}>
-                                {selectedFields.includes(f.name) ? "取消返回" : "返回"}
+                              <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: "2px 6px" }} title="只影响本次查询返回字段，不修改 entity 治理配置" onClick={() => toggleField(f.name)}>
+                                {selectedFields.includes(f.name) ? "本次不返回" : "本次返回"}
                               </button>
                             </div>
                           </td>

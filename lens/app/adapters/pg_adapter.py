@@ -74,6 +74,7 @@ async def _ensure_tables() -> None:
         fields           JSONB        NOT NULL DEFAULT '{}',
         query_constraint JSONB        NOT NULL DEFAULT '{}',
         enabled          BOOLEAN      NOT NULL DEFAULT TRUE,
+        governed         BOOLEAN      NOT NULL DEFAULT FALSE,
         created_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
         updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
     );
@@ -82,8 +83,14 @@ async def _ensure_tables() -> None:
     DO $$ BEGIN
         ALTER TABLE entity_definition ADD COLUMN IF NOT EXISTS db_type VARCHAR(32) NOT NULL DEFAULT 'mysql';
         ALTER TABLE entity_definition ADD COLUMN IF NOT EXISTS datasource VARCHAR(128) NOT NULL DEFAULT '';
+        ALTER TABLE entity_definition ADD COLUMN IF NOT EXISTS governed BOOLEAN NOT NULL DEFAULT FALSE;
     EXCEPTION WHEN OTHERS THEN NULL;
     END $$;
+
+    -- 历史全量自动导入的 entity 没经过人工治理，升级后默认转为草稿。
+    UPDATE entity_definition
+    SET enabled = FALSE, updated_at = now()
+    WHERE governed = FALSE AND enabled = TRUE;
 
     CREATE TABLE IF NOT EXISTS query_audit_log (
         id            UUID PRIMARY KEY,
@@ -130,6 +137,7 @@ async def save_entity(
     fields: dict | None = None,
     query_constraint: dict | None = None,
     enabled: bool = True,
+    governed: bool = False,
 ) -> str:
     """UPSERT entity definition，返回 id。"""
     pool = get_pool()
@@ -142,8 +150,8 @@ async def save_entity(
             INSERT INTO entity_definition (
                 id, name, display_name, database_name, db_type, datasource,
                 source_table, primary_table, join_clause, fields,
-                query_constraint, enabled, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11::jsonb, $12, now(), now())
+                query_constraint, enabled, governed, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11::jsonb, $12, $13, now(), now())
             ON CONFLICT (name) DO UPDATE SET
                 display_name     = EXCLUDED.display_name,
                 database_name    = EXCLUDED.database_name,
@@ -155,6 +163,7 @@ async def save_entity(
                 fields           = EXCLUDED.fields,
                 query_constraint = EXCLUDED.query_constraint,
                 enabled          = EXCLUDED.enabled,
+                governed         = EXCLUDED.governed,
                 updated_at       = now()
             RETURNING id
             """,
@@ -170,6 +179,7 @@ async def save_entity(
             json.dumps(fields or {}, ensure_ascii=False),
             json.dumps(query_constraint or {}, ensure_ascii=False),
             enabled,
+            governed,
         )
     return str(row["id"]) if row else eid
 
@@ -251,6 +261,7 @@ def _row_to_entity_dict(row) -> dict:
             else row["query_constraint"]
         ),
         "enabled": row["enabled"],
+        "governed": _safe_get(row, "governed", False),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }

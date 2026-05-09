@@ -25,6 +25,7 @@ class AnnotateRequest(BaseModel):
     column: str
     semantic: str
     source: str = "manual"
+    confirmed: bool | None = None
 
 
 class ConfirmRequest(BaseModel):
@@ -50,6 +51,7 @@ async def list_annotations(
     table: str | None = None,
     q: str = "",
     source: str = "",
+    status: str = "",
     confirmed: bool | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -60,6 +62,7 @@ async def list_annotations(
         table=table,
         q=q,
         source=source,
+        status=status,
         confirmed=confirmed,
         limit=limit,
         offset=offset,
@@ -95,6 +98,7 @@ async def annotate(req: AnnotateRequest):
         column=req.column,
         semantic=req.semantic,
         source=req.source,
+        confirmed=req.confirmed,
     )
     return {"id": annotation_id, "status": "saved"}
 

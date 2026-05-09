@@ -53,6 +53,7 @@ def _row_to_definition(row: dict) -> EntityDefinition:
         fields=fields,
         constraint=constraint,
         enabled=row.get("enabled", True),
+        governed=row.get("governed", False),
     )
 
 
@@ -105,6 +106,7 @@ async def register_entity(
     fields: dict[str, dict] | None = None,
     constraint: dict | None = None,
     enabled: bool = True,
+    governed: bool | None = None,
 ) -> EntityDefinition:
     """注册或更新一个 entity definition。写入 PG + 更新缓存。"""
     # 构建 fields dict for PG
@@ -132,6 +134,7 @@ async def register_entity(
         fields=fields_for_pg,
         query_constraint=constraint,
         enabled=enabled,
+        governed=enabled if governed is None else governed,
     )
 
     entity = EntityDefinition(
@@ -147,12 +150,55 @@ async def register_entity(
         fields=parsed_fields,
         constraint=EntityConstraint(**constraint) if constraint else EntityConstraint(),
         enabled=enabled,
+        governed=enabled if governed is None else governed,
     )
 
     # 更新缓存
     _entity_cache[name] = entity
     logger.info("Entity '%s' 已注册/更新", name)
     return entity
+
+
+async def update_entity_definition(
+    name: str,
+    display_name: str | None = None,
+    fields: dict[str, dict] | None = None,
+    constraint: dict | None = None,
+    enabled: bool | None = None,
+) -> EntityDefinition | None:
+    """局部更新 entity 治理配置。"""
+    current = await get_entity_definition(name)
+    if not current:
+        return None
+
+    merged_fields = {
+        fname: fdef.model_dump()
+        for fname, fdef in current.fields.items()
+    }
+    if fields:
+        for fname, patch in fields.items():
+            if fname not in merged_fields:
+                continue
+            merged_fields[fname] = {**merged_fields[fname], **patch, "name": fname}
+
+    merged_constraint = current.constraint.model_dump()
+    if constraint:
+        merged_constraint.update(constraint)
+
+    return await register_entity(
+        name=current.name,
+        display_name=current.display_name if display_name is None else display_name,
+        database=current.database,
+        db_type=current.db_type,
+        datasource=current.datasource,
+        source_table=current.source_table,
+        primary_table=current.primary_table,
+        join_clause=current.join_clause,
+        fields=merged_fields,
+        constraint=merged_constraint,
+        enabled=current.enabled if enabled is None else enabled,
+        governed=True if enabled is not None else current.governed,
+    )
 
 
 async def delete_entity_definition(name: str) -> bool:
@@ -167,10 +213,20 @@ async def delete_entity_definition(name: str) -> bool:
 
 def get_entity_cache_info() -> dict:
     """返回缓存状态（用于 /status 端点）。"""
+    entities = list(_entity_cache.values())
+    approved_count = sum(1 for e in entities if e.enabled and e.governed)
+    draft_count = sum(1 for e in entities if not e.enabled)
     return {
         "cached_count": len(_entity_cache),
+        "approved_count": approved_count,
+        "draft_count": draft_count,
         "entities": [
-            {"name": e.name, "display_name": e.display_name, "enabled": e.enabled}
-            for e in _entity_cache.values()
+            {
+                "name": e.name,
+                "display_name": e.display_name,
+                "enabled": e.enabled,
+                "governed": e.governed,
+            }
+            for e in entities[:50]
         ],
     }

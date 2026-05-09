@@ -27,6 +27,7 @@ class QueryDSL(BaseModel):
     field: list[str] | None = None
     aggregate: Literal["count"] | None = None
     preview: bool = False
+    allow_draft: bool = False
     order_by: str | None = None  # 字段名，前缀 "-" 表示 DESC
     limit: int = Field(default=20, ge=1, le=100)
     time_range: TimeRange | None = None
@@ -87,3 +88,4 @@ class EntityDefinition(BaseModel):
     fields: dict[str, EntityField] = {}  # 字段映射
     constraint: EntityConstraint = EntityConstraint()
     enabled: bool = True
+    governed: bool = False

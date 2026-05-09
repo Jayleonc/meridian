@@ -108,6 +108,7 @@ def generate_entity_from_table(
     datasource: str = "",
     row_count: int = 0,
     comment: str = "",
+    enabled: bool = False,
 ) -> dict:
     """从单张表的 schema 生成 entity 定义（不注册，仅返回定义字典）"""
     fields: dict[str, dict] = {}
@@ -154,30 +155,35 @@ def generate_entity_from_table(
             "default_time_range_days": 7 if time_field else 0,
             "required_filter_fields": [],
         },
-        "enabled": True,
+        "enabled": enabled,
     }
 
 
 async def import_from_atlas(
     database: str | None = None,
+    tables: list[str] | None = None,
     atlas_url: str = "http://127.0.0.1:3001",
     db_type: str = "mysql",
     datasource: str = "",
     overwrite: bool = False,
+    enabled: bool = False,
 ) -> dict:
     """从 Atlas 导入 schema 并自动生成 entity 定义
 
     Args:
         database: 指定数据库名，留空则导入所有
+        tables: 指定表名列表，留空则导入数据库下全部表
         atlas_url: Atlas 服务地址
         db_type: 数据库类型
         datasource: Lens 数据源名称
         overwrite: 是否覆盖已有的同名 entity
+        enabled: 是否导入后立即启用；默认 false，先进入人工治理草稿
 
     Returns:
         { imported: int, skipped: int, errors: list[str], entities: list[str] }
     """
     result = {"imported": 0, "skipped": 0, "errors": [], "entities": []}
+    selected_tables = set(tables or [])
 
     async with httpx.AsyncClient(timeout=10) as client:
         # 获取数据库列表
@@ -204,9 +210,11 @@ async def import_from_atlas(
                     result["errors"].append(f"{db}: {snapshot['error']}")
                     continue
 
-                tables = snapshot.get("table", [])
-                for table_data in tables:
+                schema_tables = snapshot.get("table", [])
+                for table_data in schema_tables:
                     table_name = table_data["name"]
+                    if selected_tables and table_name not in selected_tables:
+                        continue
                     columns = table_data.get("column", [])
 
                     if not columns:
@@ -229,6 +237,7 @@ async def import_from_atlas(
                         datasource=datasource,
                         row_count=table_data.get("row_count_approx", 0),
                         comment=table_data.get("comment", ""),
+                        enabled=enabled,
                     )
 
                     # 注册

@@ -61,6 +61,7 @@ async def search_annotations(
     q: str = "",
     source: str = "",
     confirmed: bool | None = None,
+    status: str = "",
     limit: int = 100,
     offset: int = 0,
 ) -> dict:
@@ -71,6 +72,7 @@ async def search_annotations(
         q=q,
         source=source,
         confirmed=confirmed,
+        status=status,
         limit=limit,
         offset=offset,
     )
@@ -82,7 +84,7 @@ async def delete_annotation(database: str, table: str, column: str) -> bool:
 
 
 async def list_pending_annotations(database: str) -> list[dict]:
-    """列出所有 confirmed=False 的标注（待人工确认，含 auto/ai 来源）。"""
+    """列出所有 pending 标注（待人工确认，含 auto/ai 来源）。"""
     return await pg_adapter.list_pending_annotations(database)
 
 
@@ -100,6 +102,16 @@ async def get_merged_semantics(database: str, table: str) -> dict[str, dict]:
     annotations = await pg_adapter.get_annotations(database, table)
     result: dict[str, dict] = {}
     for ann in annotations:
+        if ann.get("status") == "rejected":
+            result[ann["column_name"]] = {
+                "semantic": "",
+                "source": "rejected",
+                "confirmed": False,
+                "status": "rejected",
+            }
+            continue
+        if not ann["confirmed"]:
+            continue
         col = ann["column_name"]
         # 如果已有记录，只在新记录优先级更高时覆盖
         if col in result:
@@ -111,6 +123,7 @@ async def get_merged_semantics(database: str, table: str) -> dict[str, dict]:
             "semantic": ann["semantic"],
             "source": ann["source"],
             "confirmed": ann["confirmed"],
+            "status": ann.get("status", "confirmed" if ann["confirmed"] else "pending"),
         }
     return result
 
@@ -167,7 +180,7 @@ async def batch_annotate(
 async def confirm_annotation(
     database: str, table: str, column: str, confirmed: bool = True
 ) -> bool:
-    """确认或拒绝标注。confirmed=False 时删除该标注。"""
+    """确认或驳回标注。驳回不删除，便于恢复。"""
     return await pg_adapter.confirm_annotation(database, table, column, confirmed)
 
 

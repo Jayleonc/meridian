@@ -969,8 +969,12 @@ def create_app() -> FastAPI:
             "audit_records": len(_gateway.audit_records),
             "reload": {
                 "enabled": os.getenv("NEXUS_REGISTRY_RELOAD_ENABLED", "false").lower() == "true",
-                "strategy": "restart_or_additive_reload",
-                "note": "FastMCP can add new tool names at runtime; existing tool replacement requires restart.",
+                "strategy": "mcp_list_changed_planned_restart_fallback",
+                "note": (
+                    "MCP supports notifications/tools/list_changed so clients can re-run tools/list. "
+                    "Nexus does not emit that notification yet; existing tool schema/adapter changes "
+                    "currently use restart as the production fallback."
+                ),
             },
         }
 

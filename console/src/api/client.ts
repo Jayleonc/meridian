@@ -98,6 +98,7 @@ export interface Annotation {
   semantic: string;
   source: string;
   confirmed: boolean;
+  status?: "pending" | "confirmed" | "rejected";
   updated_at?: string;
 }
 
@@ -140,12 +141,13 @@ export const atlas = {
   // Annotations
   listAnnotations: (
     database: string,
-    opts?: { table?: string; q?: string; source?: string; confirmed?: boolean; limit?: number; offset?: number }
+    opts?: { table?: string; q?: string; source?: string; status?: string; confirmed?: boolean; limit?: number; offset?: number }
   ) => {
     const q = new URLSearchParams();
     if (opts?.table) q.set("table", opts.table);
     if (opts?.q) q.set("q", opts.q);
     if (opts?.source) q.set("source", opts.source);
+    if (opts?.status) q.set("status", opts.status);
     if (opts?.confirmed !== undefined) q.set("confirmed", String(opts.confirmed));
     q.set("limit", String(opts?.limit ?? 100));
     q.set("offset", String(opts?.offset ?? 0));
@@ -159,7 +161,7 @@ export const atlas = {
     ),
   annotationStats: (database: string) =>
     request<Record<string, unknown>>(`/api/atlas/annotations/${database}/stats`),
-  annotate: (data: { database: string; table: string; column: string; semantic: string; source?: string }) =>
+  annotate: (data: { database: string; table: string; column: string; semantic: string; source?: string; confirmed?: boolean }) =>
     request<{ id: string; status: string }>("/api/atlas/annotations/annotate", {
       method: "POST",
       body: JSON.stringify(data),
@@ -311,6 +313,8 @@ export interface EntitySummary {
   db_type: string;
   field_count: number;
   enabled: boolean;
+  governed?: boolean;
+  governance_status?: "draft" | "approved";
 }
 
 export interface EntityField {
@@ -341,6 +345,7 @@ export interface EntityDetail {
     required_filter_fields: string[];
   };
   enabled: boolean;
+  governed?: boolean;
 }
 
 export interface QueryResult {
@@ -379,11 +384,18 @@ export const lens = {
         entities: Array<{ name: string; display_name: string; enabled: boolean }>;
       };
     }>("/svc/lens/status"),
-  listEntities: () =>
-    request<{ count: number; entity: EntitySummary[] }>("/api/lens/entities"),
+  listEntities: (includeDisabled = false) =>
+    request<{ count: number; entity: EntitySummary[] }>(
+      `/api/lens/entities?include_disabled=${includeDisabled ? "true" : "false"}`
+    ),
   describeEntity: (name: string) => request<EntityDetail>(`/api/lens/entities/${name}`),
   query: (dsl: QueryDSL) =>
     request<QueryResult>("/api/lens/entities/query", {
+      method: "POST",
+      body: JSON.stringify(dsl),
+    }),
+  operatorQuery: (dsl: QueryDSL) =>
+    request<QueryResult>("/api/lens/entities/operator-query", {
       method: "POST",
       body: JSON.stringify(dsl),
     }),
@@ -392,17 +404,32 @@ export const lens = {
       "/api/lens/entities/validate",
       { method: "POST", body: JSON.stringify(dsl) }
     ),
-  importFromAtlas: (opts?: { database?: string; overwrite?: boolean }) =>
+  importFromAtlas: (opts?: { database?: string; tables?: string[]; overwrite?: boolean; enabled?: boolean }) =>
     request<{ imported: number; skipped: number; errors: string[]; entities: string[] }>(
       "/api/lens/entities/import-from-atlas",
       {
         method: "POST",
         body: JSON.stringify({
           database: opts?.database || "",
+          tables: opts?.tables || [],
           overwrite: opts?.overwrite || false,
+          enabled: opts?.enabled || false,
         }),
       }
     ),
+  updateEntity: (
+    name: string,
+    patch: {
+      display_name?: string;
+      enabled?: boolean;
+      fields?: Record<string, Partial<EntityField>>;
+      constraint?: Partial<EntityDetail["constraint"]>;
+    }
+  ) =>
+    request<{ updated: boolean; entity: EntityDetail }>(`/api/lens/entities/${name}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
   deleteEntity: (name: string) =>
     request<{ deleted: boolean; name: string }>(`/api/lens/entities/${name}`, {
       method: "DELETE",

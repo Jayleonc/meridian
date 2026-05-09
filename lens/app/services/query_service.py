@@ -48,10 +48,10 @@ async def execute_dsl_query(dsl: QueryDSL) -> QueryResult:
             error=f"业务对象 '{dsl.entity}' 不存在或未启用",
         )
 
-    if not entity.enabled:
+    if not entity.enabled and not dsl.allow_draft:
         return QueryResult(
             success=False,
-            error=f"业务对象 '{dsl.entity}' 已禁用",
+            error=f"业务对象 '{dsl.entity}' 仍是草稿，Agent 不可查询；请先在 Console 中启用，或由 Console 运维入口执行受控查询",
         )
 
     # 2. 验证 DSL

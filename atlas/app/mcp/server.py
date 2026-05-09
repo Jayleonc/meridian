@@ -199,13 +199,13 @@ async def confirm_annotation(
     """确认或拒绝一条语义标注。
 
     - confirmed=True：标注生效，可被 Lens 消费
-    - confirmed=False：拒绝并删除该标注
+    - confirmed=False：标记为 rejected，不删除记录，可后续恢复确认
 
     参数：
     - database: 数据库名
     - table: 表名
     - column: 字段名
-    - confirmed: True=确认 / False=拒绝删除
+    - confirmed: True=确认 / False=标记驳回
     """
     ok = await _confirm_annotation(database, table, column, confirmed)
     action = "confirmed" if confirmed else "rejected"

@@ -43,10 +43,17 @@ def get_default() -> BusinessDBAdapter | None:
 
 def list_adapters() -> list[dict]:
     """列出所有已注册的适配器（用于 /status 端点）"""
-    return [
-        {"name": name, "db_type": adapter.db_type}
-        for name, adapter in _adapters.items()
-    ]
+    result = []
+    for name, adapter in _adapters.items():
+        pool = getattr(adapter, "pool", None)
+        if pool is None:
+            pool = getattr(adapter, "_pool", None)
+        result.append({
+            "name": name,
+            "db_type": adapter.db_type,
+            "connected": pool is not None,
+        })
+    return result
 
 
 async def init_all() -> None:

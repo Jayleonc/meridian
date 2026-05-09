@@ -77,6 +77,10 @@ async def collect_schema(database: str) -> SchemaSnapshot:
             # 如果 PG 里有 manual/rule 标注，优先使用
             if col.name in table_manual:
                 ann = table_manual[col.name]
+                if ann.get("status") == "rejected":
+                    col.semantic = ""
+                    col.semantic_source = "rejected"
+                    continue
                 col.semantic = ann["semantic"]
                 col.semantic_source = ann["source"]
                 continue
