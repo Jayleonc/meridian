@@ -8,7 +8,6 @@ import ProbePage from "./pages/probe/ProbePage";
 import LensPage from "./pages/lens/LensPage";
 import ChatPage from "./pages/chat/ChatPage";
 import NexusPage from "./pages/nexus/NexusPage";
-import LoginPage from "./pages/LoginPage";
 
 export default function App() {
   return (
@@ -16,7 +15,6 @@ export default function App() {
       <AppProvider>
         <InvestigationProvider>
           <Routes>
-            <Route path="login" element={<LoginPage />} />
             <Route element={<Layout />}>
               <Route index element={<Dashboard />} />
               <Route path="chat" element={<ChatPage />} />

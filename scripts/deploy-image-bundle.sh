@@ -315,9 +315,17 @@ smoke_test() {
         public_url="http://$host:$PUBLIC_PORT"
     fi
 
-    MERIDIAN_DEPLOY_URL="$public_url" \
-        MERIDIAN_RUNTIME_ENV="${RUNTIME_ENV_SOURCE:-$RUNTIME_ENV_ARTIFACT}" \
-        bash scripts/deploy-smoke.sh
+    echo "==> Smoke test: $public_url/api/registry/status"
+    curl -fsS "$public_url/api/registry/status" >/tmp/meridian-deploy-smoke.json
+    python3 - <<'PY'
+import json
+from pathlib import Path
+
+data = json.loads(Path("/tmp/meridian-deploy-smoke.json").read_text())
+print("tool_exposure:", data.get("tool_exposure", {}).get("mode"))
+print("manifest_tools:", len(data.get("manifest_tools", [])))
+print("dynamic_tools_registered:", len(data.get("dynamic_tools_registered", [])))
+PY
 }
 
 if [[ "$BUILD_IMAGES" == "true" ]]; then

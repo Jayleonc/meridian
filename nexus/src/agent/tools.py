@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -153,19 +152,11 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
 }
 
 
-def _demo_mode() -> bool:
-    return os.getenv("NEXUS_DEMO_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def available_tool_names() -> list[str]:
-    if _demo_mode():
-        return []
     return list(TOOL_ARG_MODELS.keys())
 
 
 def tool_schemas() -> list[dict[str, Any]]:
-    if _demo_mode():
-        return []
     return [_tool_schema(name, model) for name, model in TOOL_ARG_MODELS.items()]
 
 

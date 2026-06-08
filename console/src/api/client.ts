@@ -2,20 +2,10 @@
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(url, {
-    credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     ...init,
   });
   if (!resp.ok) {
-    if (
-      resp.status === 401 &&
-      !url.startsWith("/api/auth") &&
-      typeof window !== "undefined" &&
-      window.location.pathname !== "/login"
-    ) {
-      const next = `${window.location.pathname}${window.location.search}`;
-      window.location.assign(`/login?next=${encodeURIComponent(next)}`);
-    }
     let detail = `${resp.status} ${resp.statusText}`;
     try {
       const body = await resp.json();
@@ -28,26 +18,6 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   }
   return resp.json() as Promise<T>;
 }
-
-export interface AuthState {
-  authenticated: boolean;
-  enabled: boolean;
-  username: string | null;
-  expires_at?: number;
-}
-
-export const auth = {
-  me: () => request<AuthState>("/api/auth/me"),
-  login: (username: string, password: string) =>
-    request<AuthState>("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ username, password }),
-    }),
-  logout: () =>
-    request<{ authenticated: boolean; enabled: boolean }>("/api/auth/logout", {
-      method: "POST",
-    }),
-};
 
 // ── Atlas ──
 
@@ -531,23 +501,7 @@ export interface NexusRegistryStatus {
   };
 }
 
-export interface NexusInfo {
-  name: string;
-  version: string;
-  auth?: {
-    enabled: boolean;
-    cookie_name: string;
-    session_seconds: number;
-  };
-  demo?: {
-    enabled: boolean;
-    allowed_pages: string[];
-    blocked_services: string[];
-  };
-}
-
 export const nexus = {
-  info: () => request<NexusInfo>("/api/nexus"),
   registry: () => request<NexusRegistry>("/registry"),
   registryStatus: () => request<NexusRegistryStatus>("/api/registry/status"),
 };

@@ -110,7 +110,7 @@ deploy-existing:
 		--runtime-config-dir "$(MERIDIAN_RUNTIME_CONFIG_DIR)"
 
 deploy-smoke:
-	MERIDIAN_DEPLOY_URL="$(MERIDIAN_DEPLOY_URL)" MERIDIAN_RUNTIME_ENV="$(MERIDIAN_RUNTIME_ENV)" bash scripts/deploy-smoke.sh
+	curl -fsS "$(MERIDIAN_DEPLOY_URL)/api/registry/status"
 
 # 停止服务
 stop:
